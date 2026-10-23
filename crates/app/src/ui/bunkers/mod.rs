@@ -2,6 +2,7 @@
 
 mod card;
 mod reading;
+pub(super) mod stamp;
 
 pub use reading::{Reading, reading, reading_color};
 

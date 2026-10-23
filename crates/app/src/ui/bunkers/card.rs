@@ -1,96 +1,107 @@
-use egui::{
-    Align, Align2, Layout, RichText, Role, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
-};
+use egui::emath::easing::cubic_out;
+use egui::{Align, Align2, Id, Layout, RichText, Role, Sense, Stroke, Ui, Vec2, WidgetInfo};
 
 use super::CARD_W;
 use super::reading::{Reading, reading, reading_color, reading_mark};
+use super::stamp::{changed_at, copied_recently, egui_time_of, first_seen, mark_copied};
 use crate::engine::Card;
 use crate::theme::{self, AMBER, DIM, RED, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 use crate::ui::UiState;
+use crate::ui::anim::Motion;
+use crate::ui::hud::{Panel, paint_frame, panel};
 use crate::ui::widgets::{ButtonKind, button, caption};
 use nasdara_decoder::bunkers::is_izurvive_url;
 
+/// Seconds a card takes to fade in, and how long the border glow and the count flash take to settle.
+const APPEAR_S: f32 = 0.32;
+const GLOW_S: f32 = 1.6;
+const COUNT_S: f32 = 0.5;
+/// Corner cut of one lock code cell.
+const CELL_CUT: f32 = 5.0;
+
 pub(super) fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
-    let age = c.updated.elapsed().as_secs_f32();
+    let ctx = ui.ctx().clone();
     let still = st.settings.reduce_motion;
-    let fresh = if still {
-        0.0
-    } else {
-        (1.0 - age / 3.0).clamp(0.0, 1.0)
-    };
-    if fresh > 0.0 {
-        ui.ctx().request_repaint();
-    }
+    let motion = Motion::new(still);
+    let key = |what: &str| Id::unique(("bunker-card", &c.key, what));
+    let appear = 1.0
+        - motion.pulse(
+            &ctx,
+            Some(first_seen(&ctx, key("first"))),
+            APPEAR_S,
+            cubic_out,
+        );
+    let updated = egui_time_of(&ctx, key("updated"), c.updated);
+    let fresh = motion.pulse(&ctx, Some(updated), GLOW_S, cubic_out);
+    let counted = changed_at(&ctx, key("count"), &c.count);
+    let flash = motion.pulse(&ctx, counted, COUNT_S, cubic_out);
     let selected = st.selected.as_deref() == Some(&c.key);
     let stroke = if selected {
         alpha(AMBER, 0.7)
     } else {
         theme::mix(STROKE, TEAL, fresh * 0.8)
     };
-    let frame = egui::Frame::new()
-        .fill(SURFACE_HI)
-        .stroke(Stroke::new(1.0 + fresh, stroke))
-        .corner_radius(12.0)
-        .inner_margin(egui::Margin::same(14));
-    let response = frame
-        .show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.set_width(CARD_W - 28.0);
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
-                ui.horizontal(|ui| {
-                    reading_mark(ui, reading(c));
-                    match c.bunker {
-                        Some(n) => caption(ui, &format!("Bunker {n}")),
-                        None => caption(ui, "Unknown bunker"),
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let heard = if c.count == 1 {
-                            "heard once".to_string()
-                        } else {
-                            format!("heard {}×", c.count)
-                        };
-                        ui.label(RichText::new(heard).font(theme::text(12.5)).color(DIM));
-                    });
-                });
-                ui.label(
-                    RichText::new(spaced_grid(&c.grid))
-                        .font(theme::digits(28.0))
-                        .color(TEXT)
-                        .extra_letter_spacing(1.0),
-                );
-                code_row(ui, c, still);
-                status_line(ui, c);
-                ui.add_space(2.0);
-                ui.horizontal(|ui| {
-                    if let Some(url) = c.url.as_deref().filter(|u| is_izurvive_url(u))
-                        && button(ui, "Open map", ButtonKind::Primary).clicked()
-                    {
-                        let _ = open::that(url);
-                    }
-                    let copied = st
-                        .copied
-                        .as_ref()
-                        .is_some_and(|(k, at)| k == &c.key && at.elapsed().as_secs_f32() < 1.6);
-                    if button(
-                        ui,
-                        if copied { "Copied" } else { "Copy code" },
-                        ButtonKind::Quiet,
-                    )
-                    .clicked()
-                    {
-                        ui.ctx().copy_text(c.code.clone());
-                        st.copied = Some((c.key.clone(), std::time::Instant::now()));
-                    }
-                });
-            })
+    let look = Panel {
+        fill: SURFACE_HI,
+        stroke: Stroke::new(1.0 + fresh * 0.5, stroke),
+        margin: egui::Margin::same(14),
+        width: Some(CARD_W),
+        ..Panel::default()
+    };
+    let response = ui
+        .scope(|ui| {
+            ui.set_opacity(appear);
+            panel(ui, look, |ui| card_body(ui, st, c, still, flash)).response
         })
-        .response;
+        .inner;
     let response = response.interact(Sense::click());
     let spoken = card_spoken(c, selected);
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, spoken.clone()));
     if response.clicked() {
         st.selected = if selected { None } else { Some(c.key.clone()) };
     }
+}
+
+fn card_body(ui: &mut Ui, st: &mut UiState, c: &Card, still: bool, flash: f32) {
+    ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
+    ui.horizontal(|ui| {
+        reading_mark(ui, reading(c));
+        match c.bunker {
+            Some(n) => caption(ui, &format!("Bunker {n}")),
+            None => caption(ui, "Unknown bunker"),
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let heard = if c.count == 1 {
+                "heard once".to_string()
+            } else {
+                format!("heard {}×", c.count)
+            };
+            let color = theme::mix(DIM, AMBER, flash);
+            ui.label(RichText::new(heard).font(theme::text(12.5)).color(color));
+        });
+    });
+    ui.label(
+        RichText::new(spaced_grid(&c.grid))
+            .font(theme::digits(28.0))
+            .color(TEXT)
+            .extra_letter_spacing(1.0),
+    );
+    code_row(ui, c, still);
+    status_line(ui, c);
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        if let Some(url) = c.url.as_deref().filter(|u| is_izurvive_url(u))
+            && button(ui, "Open map", ButtonKind::Primary).clicked()
+        {
+            let _ = open::that(url);
+        }
+        let copied = copied_recently(ui.ctx(), st, &c.key);
+        let label = if copied { "Copied" } else { "Copy code" };
+        if button(ui, label, ButtonKind::Quiet).clicked() {
+            ui.ctx().copy_text(c.code.clone());
+            mark_copied(st, &c.key);
+        }
+    });
 }
 
 /// What a screen reader says for a card.
@@ -146,14 +157,18 @@ fn code_row(ui: &mut Ui, c: &Card, still: bool) {
         for ch in c.code.chars() {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(40.0, 54.0), Sense::hover());
             let unclear = ch == '?';
-            ui.painter().rect_filled(rect, 9.0, theme::BG);
             let border = if unclear {
                 alpha(RED, 0.35 + 0.25 * (time * 3.0).sin().abs())
             } else {
                 alpha(AMBER, 0.35)
             };
-            ui.painter()
-                .rect_stroke(rect, 9.0, Stroke::new(1.0, border), StrokeKind::Inside);
+            paint_frame(
+                ui.painter(),
+                rect,
+                theme::BG,
+                Stroke::new(1.0, border),
+                CELL_CUT,
+            );
             ui.painter().text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -202,8 +217,7 @@ fn status_row(ui: &mut Ui, r: Reading, text: &str) {
     let color = reading_color(r);
     ui.horizontal_top(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 16.0), Sense::hover());
-        ui.painter()
-            .circle_filled(rect.center() + Vec2::new(0.0, 1.0), 3.5, color);
+        ui.painter().circle_filled(rect.center(), 3.5, color);
         ui.add(egui::Label::new(RichText::new(text).font(theme::text(12.5)).color(DIM)).wrap());
     });
 }
