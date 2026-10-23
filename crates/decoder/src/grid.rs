@@ -169,7 +169,15 @@ impl Dp {
             }
         }
         for j in 0..count {
-            for start in 0..frames {
+            // Only starts within the jitter of a reachable end of row `j` can have a predecessor.
+            let row = &self.best[j * stride..(j + 1) * stride];
+            let Some(lo) = row.iter().position(|&b| b != NEG) else {
+                break;
+            };
+            let hi = row.iter().rposition(|&b| b != NEG).unwrap_or(lo);
+            let first = lo.saturating_sub(jitter);
+            let last = (hi + jitter).min(frames - 1);
+            for start in first..=last {
                 let mut base = NEG;
                 let mut from = None;
                 for f in start.saturating_sub(jitter)..=(start + jitter).min(stride - 1) {

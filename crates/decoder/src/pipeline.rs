@@ -25,7 +25,9 @@ const PREVIEW_MIN_RUNS: usize = 6;
 /// Recompute the preview only after this many new frames.
 /// The decoder's jitter allowance: a digit counts as settled only when the trace extends this far past its window.
 const SETTLE_S: f64 = 0.12;
-const PREVIEW_REFRESH_FRAMES: u64 = 40;
+const PREVIEW_REFRESH_FRAMES: u64 = 60;
+/// The preview decodes at most this many seconds of the open burst (the newest): a message is about 90 s.
+const PREVIEW_MAX_S: f64 = 100.0;
 
 /// One digit of a live preview. A digit whose last symbol window is still open (`settled == false`) may change on the
 /// next preview: a shorter look-alike that fits the audio so far can take its place until the window has passed.
@@ -104,6 +106,10 @@ impl Default for Pipeline {
 
 fn keep_frames() -> usize {
     (TRACE_KEEP_S / FRAME_SECONDS).ceil() as usize
+}
+
+fn preview_max_frames() -> usize {
+    (PREVIEW_MAX_S / FRAME_SECONDS).ceil() as usize
 }
 
 fn unpoison<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -241,7 +247,7 @@ impl Pipeline {
         let first = open.first_frame.saturating_sub(self.levels_base) as usize;
         let from = first
             .saturating_sub(margin)
-            .max(self.levels.len().saturating_sub(keep_frames()));
+            .max(self.levels.len().saturating_sub(preview_max_frames()));
         let trace = self.levels.get(from..)?;
         let t0 = self.level_time(from);
         let g = decode_prefix(trace, &SHIPPED_TIMING, DIGITS_PER_RECORD)?;
