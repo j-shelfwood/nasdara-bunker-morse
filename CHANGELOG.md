@@ -9,6 +9,7 @@ First release.
 - Lock codes are voted digit by digit over every repeat of a bunker's message.
 - Opens the bunker's position on iZurvive.
 - Falls back to listening to all system audio for PCs where Windows does not hand DayZ's sound to the app.
+- Morse cheat sheet under the bunkers: the ten digits as dots and dashes, a tap plays a pattern, and while a message arrives the digits that fit what was heard so far light up. It can be hidden in the menu.
 - Test mode (options menu, or `--demo`) plays synthetic beeps on repeat, so the window can be tried without the game. It is the default off Windows.
 - Pin button keeps the window above the game (borderless windowed mode).
 - Flashes the taskbar button when a bunker has been read (option, on by default).

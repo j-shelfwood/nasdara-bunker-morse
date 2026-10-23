@@ -1,12 +1,13 @@
 //! Renders the window to PNG files with a real engine fed by the demo transmission, for checking the look without
 //! a display: `cargo run --release --example preview -- <out-dir> [--size WxH] <stream-second>...`.
+//! `--menu` (with no stream seconds) also renders the options menu open.
 //! `--size 760x520` renders at another window size in points (default 1060x800); file names then carry the size.
 //! Set NASDARA_FONT_DIR to a folder with segoeui.ttf, segoeuib.ttf and bahnschrift.ttf to preview with the Windows fonts.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use egui_kittest::Harness;
+use egui_kittest::{Harness, kittest::Queryable};
 use nasdara_bunker_morse::capture::Source;
 use nasdara_bunker_morse::engine::{self, Command, Handle};
 use nasdara_bunker_morse::theme;
@@ -20,7 +21,7 @@ fn main() {
     // `--result clear|unclear|silent`: a synthetic finished transmission and a few cards (stand-ins, not decoded audio)
     let mut result: Option<String> = None;
     // `--reduce-motion` sets the setting; `--twice` renders a second frame 0.3 s later and prints how many pixels moved
-    let (mut reduce_motion, mut twice) = (false, false);
+    let (mut reduce_motion, mut twice, mut menu) = (false, false, false);
     while let Some(a) = args.next() {
         if a == "--size" {
             let parsed = args.next().and_then(|v| {
@@ -30,6 +31,8 @@ fn main() {
             size = parsed.expect("--size needs WxH, e.g. 760x520");
         } else if a == "--reduce-motion" {
             reduce_motion = true;
+        } else if a == "--menu" {
+            menu = true;
         } else if a == "--twice" {
             twice = true;
         } else if a == "--result" {
@@ -103,6 +106,11 @@ fn main() {
         harness.state_mut().1.onboarding = None;
         harness.run_steps(8);
         save(&mut harness, &out.join(format!("idle{suffix}.png")));
+        if menu {
+            harness.get_by_label("Options").click();
+            harness.run_steps(8);
+            save(&mut harness, &out.join(format!("menu{suffix}.png")));
+        }
         return;
     }
     engine.send(Command::StartDemo);

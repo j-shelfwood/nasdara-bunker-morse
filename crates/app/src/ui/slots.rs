@@ -37,6 +37,11 @@ pub struct View {
     pub hint: String,
 }
 
+/// Symbols heard so far of the digit being sent; empty when no message is arriving.
+pub fn live_symbols(s: &Shared) -> String {
+    view(s).live_symbols
+}
+
 pub fn view(s: &Shared) -> View {
     let now = s.now();
     let mut slots = vec![

@@ -1,4 +1,5 @@
 mod cards;
+mod guide;
 mod island;
 mod latest;
 mod onboarding;
@@ -33,6 +34,8 @@ pub struct Settings {
     pub open_map_for_new: bool,
     /// No pulses, glows, blinking cursor or pop animations, and no fast repaint for them.
     pub reduce_motion: bool,
+    /// The Morse cheat sheet under the bunkers.
+    pub show_guide: bool,
 }
 
 impl Default for Settings {
@@ -44,6 +47,7 @@ impl Default for Settings {
             flash_taskbar: true,
             open_map_for_new: false,
             reduce_motion: false,
+            show_guide: true,
         }
     }
 }
@@ -56,6 +60,8 @@ pub struct UiState {
     card_seen: HashMap<String, (String, String)>,
     copied: Option<(String, Instant)>,
     selected: Option<String>,
+    /// The cheat sheet digit being played and when it started, in egui time.
+    guide_play: Option<(char, f64)>,
     on_top_sent: Option<bool>,
     min_size_sent: bool,
     window_fitted: bool,
@@ -72,6 +78,7 @@ impl UiState {
             card_seen: HashMap::new(),
             copied: None,
             selected: None,
+            guide_play: None,
             on_top_sent: None,
             min_size_sent: false,
             window_fitted: false,
@@ -142,6 +149,9 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
                     banner(ui, engine, &s);
                     live_card(ui, st, &s);
                     bunkers_card(ui, engine, st, &s);
+                    if st.settings.show_guide {
+                        guide::show(ui, st, &s);
+                    }
                 });
         });
 
@@ -286,23 +296,11 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
                 }
             });
             egui::Popup::menu(&gear).show(|ui| {
-                ui.set_min_width(250.0);
-                ui.checkbox(
-                    &mut st.settings.flash_taskbar,
-                    "Flash the taskbar when a bunker is read",
-                );
-                ui.checkbox(
-                    &mut st.settings.open_map_for_new,
-                    "Open the map for each new bunker",
-                );
-                ui.checkbox(
-                    &mut st.settings.reduce_motion,
-                    "Reduce motion (no pulses, glows or blinking)",
-                );
-                ui.separator();
+                ui.set_min_width(300.0);
+                let still = st.settings.reduce_motion;
+                widgets::toggle(ui, &mut st.settings.show_guide, "Morse cheat sheet", still);
                 let mut test = s.mode == Mode::Demo;
-                if ui
-                    .checkbox(&mut test, "Test mode: a simulated broadcast")
+                if widgets::toggle(ui, &mut test, "Test mode: a simulated broadcast", still)
                     .on_hover_text(
                         "Plays a made-up transmission on repeat, to try the window without the game. \
                          Turning it on or off forgets the bunkers heard so far.",
@@ -316,6 +314,26 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
                     });
                     engine.send(Command::ClearCards);
                 }
+                ui.separator();
+                widgets::toggle(
+                    ui,
+                    &mut st.settings.flash_taskbar,
+                    "Flash the taskbar when a bunker is read",
+                    still,
+                );
+                widgets::toggle(
+                    ui,
+                    &mut st.settings.open_map_for_new,
+                    "Open the map for each new bunker",
+                    still,
+                );
+                widgets::toggle(
+                    ui,
+                    &mut st.settings.reduce_motion,
+                    "Reduce motion (no pulses, glows or blinking)",
+                    still,
+                );
+                ui.separator();
                 if ui.button("Forget the bunkers heard so far").clicked() {
                     engine.send(Command::ClearCards);
                 }

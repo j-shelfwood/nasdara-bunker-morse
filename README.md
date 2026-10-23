@@ -29,9 +29,10 @@ repeat fills in digits the previous one missed, so a card shows `?` for a digit 
 ![The result of a finished message](docs/images/result.png)
 
 The window can stay above the game: the pin button in the header does that, and it needs the game in borderless windowed
-mode. The gear menu next to it holds the other options: flash the taskbar when a bunker is read (the flash may not be
-visible when the game hides the taskbar), open the map for each new bunker, test mode (a simulated broadcast on repeat, to try the window without the game),
-forget the bunkers heard so far, and show the walkthrough again. Settings are stored in your user app data folder.
+mode. The menu next to it (the three lines) holds the other options as switches: the Morse cheat sheet, flash the
+taskbar when a bunker is read (the flash may not be visible when the game hides the taskbar), open the map for each new
+bunker, and test mode (a simulated broadcast on repeat, to try the window without the game). It also has buttons to
+forget the bunkers heard so far and to show the walkthrough again. Settings are stored in your user app data folder.
 
 ### If nothing is heard
 
