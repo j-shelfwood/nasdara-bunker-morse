@@ -77,7 +77,6 @@ impl Motion {
     pub fn pulse(
         &self,
         ctx: &Context,
-        _id: Id,
         started_at: Option<f64>,
         secs: f32,
         ease: fn(f32) -> f32,
@@ -177,7 +176,7 @@ mod tests {
         let at = |t: f64| {
             let mut v = 0.0;
             frame(&ctx, t, |c| {
-                v = m.pulse(c, id(), Some(1.0), 0.5, egui::emath::easing::quadratic_out)
+                v = m.pulse(c, Some(1.0), 0.5, egui::emath::easing::quadratic_out)
             });
             v
         };
@@ -188,13 +187,13 @@ mod tests {
         let r = Motion::new(true);
         frame(&ctx, 1.0, |c| {
             assert_eq!(
-                r.pulse(c, id(), Some(1.0), 0.5, egui::emath::easing::quadratic_out),
+                r.pulse(c, Some(1.0), 0.5, egui::emath::easing::quadratic_out),
                 0.0
             )
         });
         frame(&ctx, 1.0, |c| {
             assert_eq!(
-                m.pulse(c, id(), None, 0.5, egui::emath::easing::quadratic_out),
+                m.pulse(c, None, 0.5, egui::emath::easing::quadratic_out),
                 0.0
             )
         });
