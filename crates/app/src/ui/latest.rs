@@ -63,7 +63,11 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) -> bool {
         None => c.grid == r.grid,
     });
     let is_new = card.is_none_or(|c| c.count <= 1);
-    let arrival = (1.0 - f.heard.elapsed().as_secs_f32() / ARRIVAL_S).clamp(0.0, 1.0);
+    let arrival = if st.settings.reduce_motion {
+        0.0
+    } else {
+        (1.0 - f.heard.elapsed().as_secs_f32() / ARRIVAL_S).clamp(0.0, 1.0)
+    };
     if arrival > 0.0 {
         ui.ctx().request_repaint();
     }

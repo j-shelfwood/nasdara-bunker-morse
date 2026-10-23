@@ -154,7 +154,12 @@ fn ago_text(secs: u64) -> String {
 }
 
 pub fn show(ui: &mut Ui, st: &mut UiState, v: &View) {
-    let time = ui.input(|i| i.time) as f32;
+    // time 0 freezes every sine and blink at its steady, visible state
+    let time = if st.settings.reduce_motion {
+        0.0
+    } else {
+        ui.input(|i| i.time) as f32
+    };
     let avail = ui.available_width();
     let gap = 8.0_f32;
     let group_gap = 16.0_f32;
@@ -207,7 +212,10 @@ pub fn show(ui: &mut Ui, st: &mut UiState, v: &View) {
 
     for (i, slot) in v.slots.iter().enumerate() {
         let rect = Rect::from_min_size(Pos2::new(xs[i], top), Vec2::new(w, h));
-        let pop = st.pop(i, slot.ch, slot.phase == Phase::Final, ui.input(|i| i.time));
+        let mut pop = st.pop(i, slot.ch, slot.phase == Phase::Final, ui.input(|i| i.time));
+        if st.settings.reduce_motion {
+            pop = Pop::default();
+        }
         if pop.pop > 0.0 || pop.ring > 0.0 {
             ui.ctx().request_repaint();
         }
@@ -272,7 +280,7 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
                     painter,
                     Pos2::new(rect.center().x, rect.bottom() - 36.0),
                     pattern_of(ch),
-                    0.85,
+                    0.85_f32.min((rect.width() - 8.0) / symbols_width(pattern_of(ch))),
                     alpha(DIM, 0.8),
                 );
             }

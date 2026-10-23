@@ -19,6 +19,8 @@ fn main() {
     let mut marks: Vec<f64> = Vec::new();
     // `--result clear|unclear|silent`: a synthetic finished transmission and a few cards (stand-ins, not decoded audio)
     let mut result: Option<String> = None;
+    // `--reduce-motion` sets the setting; `--twice` renders a second frame 0.3 s later and prints how many pixels moved
+    let (mut reduce_motion, mut twice) = (false, false);
     while let Some(a) = args.next() {
         if a == "--size" {
             let parsed = args.next().and_then(|v| {
@@ -26,6 +28,10 @@ fn main() {
                 Some((w.parse().ok()?, h.parse().ok()?))
             });
             size = parsed.expect("--size needs WxH, e.g. 760x520");
+        } else if a == "--reduce-motion" {
+            reduce_motion = true;
+        } else if a == "--twice" {
+            twice = true;
         } else if a == "--result" {
             result = args.next();
         } else if let Ok(m) = a.parse() {
@@ -42,6 +48,7 @@ fn main() {
     let engine = engine::start(Source::Game, egui::Context::default(), None);
     let settings = Settings {
         onboarded: !marks.is_empty() || result.is_some(),
+        reduce_motion,
         ..Settings::default()
     };
     let mut harness = Harness::builder()
@@ -63,6 +70,25 @@ fn main() {
             &out.join(format!("result-{kind}{suffix}.png")),
         );
         eprintln!("wrote result-{kind}{suffix}.png");
+        if twice {
+            let first = harness.render().expect("render");
+            harness.run_steps(20);
+            let second = harness.render().expect("render");
+            let moved = first
+                .pixels()
+                .zip(second.pixels())
+                .filter(|(a, b)| a != b)
+                .count();
+            let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+            for (x, y, a) in first.enumerate_pixels() {
+                if a != second.get_pixel(x, y) {
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                }
+            }
+            eprintln!(
+                "pixels changed after 20 steps: {moved} in box ({x0},{y0})-({x1},{y1}) (reduce_motion={reduce_motion})"
+            );
+        }
         return;
     }
     if marks.is_empty() {

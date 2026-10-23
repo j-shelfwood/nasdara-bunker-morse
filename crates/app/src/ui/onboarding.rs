@@ -13,7 +13,12 @@ pub enum Outcome {
     Demo,
 }
 
-pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -> Outcome {
+pub fn show(
+    ctx: &egui::Context,
+    ids: &(egui::Id, egui::Id),
+    page: &mut usize,
+    still: bool,
+) -> Outcome {
     let screen = ctx.content_rect();
     let mut outcome = Outcome::Open;
     let last = *page + 1 == PAGES;
@@ -60,7 +65,7 @@ pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -
                 .show(ui, |ui| {
                     ui.set_min_size(size);
                     ui.set_max_size(size);
-                    illustration(ui, *page, size.x);
+                    illustration(ui, *page, size.x, still);
                     ui.add_space(8.0);
                     egui::Frame::new()
                         .inner_margin(egui::Margin::symmetric(32, 0))
@@ -179,7 +184,7 @@ fn body(ui: &mut Ui, page: usize) {
 }
 
 /// A looping picture for each page, painted from the same shapes the live ribbon uses.
-fn illustration(ui: &mut Ui, page: usize, width: f32) {
+fn illustration(ui: &mut Ui, page: usize, width: f32, still: bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 150.0), Sense::hover());
     let p = ui.painter_at(rect);
     p.rect_filled(
@@ -192,8 +197,15 @@ fn illustration(ui: &mut Ui, page: usize, width: f32) {
         },
         theme::BG,
     );
-    let t = ui.input(|i| i.time) as f32;
-    ui.ctx().request_repaint();
+    // a still picture holds the frame where the pictures read best
+    let t = if still {
+        1.2
+    } else {
+        ui.input(|i| i.time) as f32
+    };
+    if !still {
+        ui.ctx().request_repaint();
+    }
     match page {
         0 => morse_loop(&p, rect, t),
         1 => radio_scene(&p, rect, t),
@@ -352,7 +364,7 @@ mod tests {
             .with_context_setup(theme::install)
             .build_ui_state(
                 move |ui, page: &mut usize| {
-                    let _ = show(ui.ctx(), &ids, page);
+                    let _ = show(ui.ctx(), &ids, page, false);
                 },
                 0usize,
             )

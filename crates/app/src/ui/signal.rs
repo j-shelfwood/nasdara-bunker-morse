@@ -55,7 +55,7 @@ impl Size {
     }
 }
 
-pub fn show(ui: &mut Ui, s: &Shared, size: Size) {
+pub fn show(ui: &mut Ui, s: &Shared, size: Size, still: bool) {
     let width = ui.available_width();
     let ribbon_h = size.ribbon;
     let level_h = size.level;
@@ -66,7 +66,11 @@ pub fn show(ui: &mut Ui, s: &Shared, size: Size) {
     );
     let painter = ui.painter_at(rect);
     let now = s.now();
-    let t = ui.input(|i| i.time) as f32;
+    let t = if still {
+        0.0
+    } else {
+        ui.input(|i| i.time) as f32
+    };
 
     let ribbon = Rect::from_min_size(rect.min, Vec2::new(width, ribbon_h));
     let level = Rect::from_min_size(
@@ -228,7 +232,13 @@ pub fn show(ui: &mut Ui, s: &Shared, size: Size) {
         let recent = b
             .end
             .map_or(0.0, |e| (1.0 - ((now - e) / 0.5) as f32).clamp(0.0, 1.0));
-        let glow = if on { 1.0 } else { recent };
+        let glow = if still {
+            0.0
+        } else if on {
+            1.0
+        } else {
+            recent
+        };
         if glow > 0.0 {
             painter.rect_filled(
                 r.expand(5.0 * glow + 1.0),

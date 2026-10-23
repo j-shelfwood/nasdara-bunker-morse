@@ -64,7 +64,12 @@ fn empty(ui: &mut Ui) {
 
 fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
     let age = c.updated.elapsed().as_secs_f32();
-    let fresh = (1.0 - age / 3.0).clamp(0.0, 1.0);
+    let still = st.settings.reduce_motion;
+    let fresh = if still {
+        0.0
+    } else {
+        (1.0 - age / 3.0).clamp(0.0, 1.0)
+    };
     if fresh > 0.0 {
         ui.ctx().request_repaint();
     }
@@ -105,7 +110,7 @@ fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
                         .color(TEXT)
                         .extra_letter_spacing(1.0),
                 );
-                code_row(ui, c);
+                code_row(ui, c, still);
                 status_line(ui, c);
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
@@ -182,8 +187,12 @@ fn spaced_grid(grid: &str) -> String {
     }
 }
 
-fn code_row(ui: &mut Ui, c: &Card) {
-    let time = ui.input(|i| i.time) as f32;
+fn code_row(ui: &mut Ui, c: &Card, still: bool) {
+    let time = if still {
+        0.0
+    } else {
+        ui.input(|i| i.time) as f32
+    };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         for ch in c.code.chars() {
@@ -212,9 +221,9 @@ fn code_row(ui: &mut Ui, c: &Card) {
                 .color(DIM),
         );
     });
-    if c.code.contains('?') {
+    if c.code.contains('?') && !still {
         ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(50));
+            .request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
 
@@ -307,7 +316,12 @@ fn status_row(ui: &mut Ui, r: Reading, text: &str) {
 pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
     let p = ui.painter_at(rect);
-    let time = ui.input(|i| i.time) as f32;
+    let still = st.settings.reduce_motion;
+    let time = if still {
+        0.0
+    } else {
+        ui.input(|i| i.time) as f32
+    };
     p.rect_filled(rect, 12.0, theme::BG);
     p.rect_stroke(rect, 12.0, Stroke::new(1.0, STROKE), StrokeKind::Inside);
     let inner = rect.shrink(12.0);
@@ -355,7 +369,7 @@ pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
             Some(c) => {
                 let sel = st.selected.as_deref() == Some(&c.key);
                 let phase = (time * 0.9).fract();
-                if sel || c.updated.elapsed().as_secs_f32() < 4.0 {
+                if sel || (!still && c.updated.elapsed().as_secs_f32() < 4.0) {
                     p.circle_stroke(
                         pos,
                         5.0 + 12.0 * phase,

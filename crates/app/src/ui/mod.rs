@@ -30,6 +30,8 @@ pub struct Settings {
     pub always_on_top: bool,
     pub flash_taskbar: bool,
     pub open_map_for_new: bool,
+    /// No pulses, glows, blinking cursor or pop animations, and no fast repaint for them.
+    pub reduce_motion: bool,
 }
 
 impl Default for Settings {
@@ -40,6 +42,7 @@ impl Default for Settings {
             always_on_top: false,
             flash_taskbar: true,
             open_map_for_new: false,
+            reduce_motion: false,
         }
     }
 }
@@ -86,8 +89,6 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     // animation drives its own repaints; idle windows repaint a few times a second so clocks and ages stay current
     if s.receiving() {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
-    } else if s.status == Status::Listening {
-        ctx.request_repaint_after(std::time::Duration::from_millis(33));
     } else {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
@@ -143,7 +144,7 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     drop(s);
     if let Some(page) = st.onboarding {
         let mut page = page;
-        match onboarding::show(&ctx, &st.modal_ids, &mut page) {
+        match onboarding::show(&ctx, &st.modal_ids, &mut page, st.settings.reduce_motion) {
             onboarding::Outcome::Open => st.onboarding = Some(page),
             onboarding::Outcome::Close => finish_onboarding(st),
             onboarding::Outcome::Demo => {
@@ -229,6 +230,11 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
         });
         ui.add_space(18.0);
         let (label, dot, pulse) = status_chip(s, ui.input(|i| i.time) as f32);
+        let pulse = if st.settings.reduce_motion {
+            0.0
+        } else {
+            pulse
+        };
         pill(ui, &Pill { dot, pulse, label });
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -283,6 +289,10 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
                     &mut st.settings.open_map_for_new,
                     "Open the map for each new bunker",
                 );
+                ui.checkbox(
+                    &mut st.settings.reduce_motion,
+                    "Reduce motion (no pulses, glows or blinking)",
+                );
                 ui.separator();
                 if ui.button("Forget the bunkers heard so far").clicked() {
                     engine.send(Command::ClearCards);
@@ -318,7 +328,8 @@ fn status_chip(s: &Shared, time: f32) -> (String, egui::Color32, f32) {
                 "Listening to system audio".into()
             },
             TEAL,
-            breathe(0.5),
+            // an idle window repaints a few times a second, too slowly for a smooth breathing dot
+            0.0,
         ),
         Status::WaitingForGame => ("Waiting for DayZ".into(), FAINT, 0.0),
         Status::Failed(_) => ("Cannot listen".into(), RED, 0.0),
@@ -394,7 +405,7 @@ fn live_card(ui: &mut Ui, st: &mut UiState, s: &Shared) {
         if !squeezed {
             slots::show(ui, st, &v);
             ui.add_space(6.0);
-            signal::show(ui, s, size);
+            signal::show(ui, s, size, st.settings.reduce_motion);
         }
     });
 }
