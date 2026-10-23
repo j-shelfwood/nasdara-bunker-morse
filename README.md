@@ -15,8 +15,9 @@ Unofficial fan project, not affiliated with Bohemia Interactive.
 
 ## Using it
 
-1. Download `bunker-morse-<version>-windows-x64.exe` from the [latest release](../../releases/latest).
-   Optionally check it against `SHA256SUMS.txt`.
+1. Download `bunker-morse-<tag>-windows-x64.exe` from the [latest release](../../releases/latest).
+   Optionally check it against `SHA256SUMS.txt`. The release also carries `THIRD-PARTY-LICENSES.html`, the notices of
+   the libraries inside the exe.
 2. Start DayZ, then start the app. A short walkthrough opens the first time.
 3. In the game, hold a powered radio tuned to the bunker frequency during the broadcast window, 17:45 to 06:00 game time.
 4. Watch the window. The ten digit slots fill in as the message arrives (six for the map grid, four for the lock code).
@@ -27,8 +28,10 @@ repeat fills in digits the previous one missed, so a card shows `?` for a digit 
 
 ![Bunker cards and the map](docs/images/cards.png)
 
-The window can stay above the game (pin button, needs the game in borderless windowed mode) and flashes its taskbar button
-when a bunker has been read. Both are in the options menu next to the pin.
+The window can stay above the game: the pin button in the header does that, and it needs the game in borderless windowed
+mode. The gear menu next to it holds the other options: flash the taskbar when a bunker is read (the flash may not be
+visible when the game hides the taskbar), open the map for each new bunker, forget the bunkers heard so far, and show the
+walkthrough again. Settings are stored in your user app data folder.
 
 ### If nothing is heard
 
@@ -41,7 +44,7 @@ one of the real bunkers. Giving DayZ its own output device in the Windows volume
 
 The exe is not code signed, so SmartScreen may say it is an unknown app: choose More info, then Run anyway. The release
 exe is built by GitHub Actions from the tagged source, and each release carries a build attestation you can check with
-`gh attestation verify <file> --repo j-shelfwood/nasdara-bunker-morse`.
+`gh attestation verify bunker-morse-<tag>-windows-x64.exe --repo j-shelfwood/nasdara-bunker-morse`.
 
 ## Privacy and the game's anti-cheat
 
@@ -50,7 +53,10 @@ exe is built by GitHub Actions from the tagged source, and each release carries 
 - Capture uses the Windows audio API for per-process loopback (the same API screen recorders use). The app does not read
   DayZ's memory, inject code or touch the game's files. It has not been reviewed by BattlEye or Bohemia, so use it at your own risk.
 - `--log <file>` (optional, off by default) writes one line per decoded message with beep timings and digits, no audio.
-  `--trace` adds the tone level per frame. They exist for bug reports.
+  With `--trace` it also writes a second file, `<file>.trace.jsonl`, with the tone level per frame. They exist for bug
+  reports: attach both files.
+- `--gpu-check <file>` writes a list of the graphics adapters the window could use to `<file>` and exits. Use it when the
+  window does not open.
 
 ## How it works
 
@@ -64,13 +70,15 @@ Details, measurements and assumptions: [docs/how-it-works.md](docs/how-it-works.
 - Nasdara only. A server that changes the playback timings in its `cfgbunkerbroadcast.json` needs a matching `Timing`
   in `crates/decoder/src/grid.rs`.
 - Tested on one PC over one live broadcast night plus generated audio. Loud wind or other noise under the beeps
-  (about half as loud as a beep, in synthetic tests) makes digits unreadable.
+  can make digits unreadable. In synthetic tests decoding was exact with wind up to about half as loud as a beep; louder wind
+  was not tested for exactness.
 - The in-game grid is assumed to be the same as iZurvive's. Three bunkers heard so far matched.
 
 ## Building
 
 Needs a recent stable [Rust](https://rustup.rs). The decoder crate builds and tests anywhere; the app is Windows-first
-(live capture needs Windows, the rest also builds on macOS and Linux).
+(live capture needs Windows). The app has only been run on Windows and on macOS (where it runs the demo); CI compiles
+it on Windows only, so Linux is untested.
 
 ```
 cargo test --workspace
@@ -85,9 +93,9 @@ Set `NASDARA_FONT_DIR` to a folder with `segoeui.ttf`, `segoeuib.ttf` and `bahns
 
 ## Contributing
 
-Bug reports with a decoder log help most, especially from other audio setups and servers. Pull requests are welcome;
-please run `cargo fmt` and `cargo clippy` first.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). The licences of the libraries inside the exe are in `THIRD-PARTY-LICENSES.html`, attached to each
+release and kept in this repository.
