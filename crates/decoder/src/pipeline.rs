@@ -2,7 +2,7 @@
 
 use crate::bunkers::snap_grid;
 use crate::bursts::{AssemblerOptions, BunkerRecord, Burst, BurstAssembler, Trace};
-use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_grid, decode_prefix};
+use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_grid, decode_prefix, longest_digit_s};
 use crate::js_round;
 use crate::runs::{RunOptions, RunTracker};
 use crate::tone::{FRAME_SECONDS, ToneDetector, ToneFrame};
@@ -23,8 +23,12 @@ const MIN_READABLE: usize = 6;
 /// A preview needs this many tone runs in the open burst; fewer is a stray tone.
 const PREVIEW_MIN_RUNS: usize = 6;
 /// Recompute the preview only after this many new frames.
+/// The decoder's jitter allowance: a digit counts as settled only when the trace extends this far past its window.
+const SETTLE_S: f64 = 0.12;
 const PREVIEW_REFRESH_FRAMES: u64 = 40;
 
+/// One digit of a live preview. A digit whose last symbol window is still open (`settled == false`) may change on the
+/// next preview: a shorter look-alike that fits the audio so far can take its place until the window has passed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewDigit {
     /// '?' when the support is below `MIN_SUPPORT`.
@@ -35,8 +39,14 @@ pub struct PreviewDigit {
     pub start: f64,
     /// Stream seconds at which the digit's last symbol window ended.
     pub window_end: f64,
+    /// False while the digit may still change in later previews: only the trailing digit can be unsettled, and it
+    /// is until the trace extends past `window_end` plus the jitter allowance (`SETTLE_S`) and past the longest
+    /// digit's length from the digit's start, because a shorter look-alike fits the audio first (4821: the fifth digit
+    /// reads 5, 6, 4, 7, 8, 9 before the real 0). A UI should not present an unsettled digit as read.
+    pub settled: bool,
 }
 
+/// Digits read from the transmission in progress. Digits with `settled == false` (only ever the last) may change.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preview {
     /// Stream seconds of the first digit.
@@ -235,7 +245,10 @@ impl Pipeline {
         let trace = self.levels.get(from..)?;
         let t0 = self.level_time(from);
         let g = decode_prefix(trace, &SHIPPED_TIMING, DIGITS_PER_RECORD)?;
-        let digits = (0..g.digits.len())
+        let trace_end = self.levels_end;
+        let longest = longest_digit_s(&SHIPPED_TIMING);
+        let n = g.digits.len();
+        let digits = (0..n)
             .map(|i| PreviewDigit {
                 ch: if g.support[i] >= MIN_SUPPORT {
                     g.digits[i]
@@ -246,6 +259,9 @@ impl Pipeline {
                 margin: g.margins[i],
                 start: t0 + g.starts[i],
                 window_end: t0 + g.ends[i],
+                settled: i + 1 < n
+                    || (t0 + g.ends[i] + SETTLE_S <= trace_end
+                        && t0 + g.starts[i] + longest + SETTLE_S <= trace_end),
             })
             .collect();
         Some(Preview {

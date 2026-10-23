@@ -74,6 +74,15 @@ fn patterns_of(t: &Timing) -> Vec<Pattern> {
         .collect()
 }
 
+/// Seconds from a digit's start to the end of its last symbol window for the longest digit (all dashes): until a
+/// trace extends this far past a start, a shorter look-alike digit may still be displaced by the real, longer one.
+pub fn longest_digit_s(timing: &Timing) -> f64 {
+    patterns_of(timing)
+        .iter()
+        .map(|p| (p.len - p.tail) as f64 * FRAME_SECONDS)
+        .fold(0.0, f64::max)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GridDecode {
     pub digits: Vec<char>,
