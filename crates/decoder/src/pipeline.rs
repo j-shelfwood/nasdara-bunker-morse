@@ -14,6 +14,8 @@ pub struct Live {
     pub db: f32,
 }
 
+/// One second of audio: the most `push` analyses before it trims the trace and decodes finished bursts.
+const PUSH_STEP_SAMPLES: usize = 44_100;
 const TRACE_KEEP_S: f64 = 150.0;
 const TRACE_MARGIN_S: f64 = 2.0;
 /// Below this a digit is reported as '?': the beeps that would decide it were not (all) heard.
@@ -170,7 +172,19 @@ impl Pipeline {
         self.bursts.pending()
     }
 
+    /// Feeds samples. A long slice is processed in steps of `PUSH_STEP_SAMPLES`, so the tone trace is trimmed and the
+    /// finished bursts are decoded while their frames are still held, however much is pushed at once.
     pub fn push(&mut self, samples: &[i16]) -> PushResult {
+        let mut out = PushResult::default();
+        for step in samples.chunks(PUSH_STEP_SAMPLES) {
+            let r = self.push_step(step);
+            out.frames.extend(r.frames);
+            out.bursts.extend(r.bursts);
+        }
+        out
+    }
+
+    fn push_step(&mut self, samples: &[i16]) -> PushResult {
         if self.closing.as_ref().is_some_and(|c| c.released) {
             self.closing = None;
         }
@@ -384,6 +398,21 @@ impl Pipeline {
 }
 
 /// `Number(s.toFixed(2))`
+/// Never returns negative zero.
 fn round2(s: f32) -> f32 {
-    format!("{s:.2}").parse().unwrap_or(s)
+    let r: f32 = format!("{s:.2}").parse().unwrap_or(s);
+    if r == 0.0 { 0.0 } else { r }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::round2;
+
+    #[test]
+    fn round2_never_returns_negative_zero() {
+        assert_eq!(round2(-0.001).to_bits(), 0.0f32.to_bits());
+        assert_eq!(round2(-0.0).to_bits(), 0.0f32.to_bits());
+        assert_eq!(round2(1.0549), 1.05);
+        assert_eq!(round2(-0.4), -0.4);
+    }
 }

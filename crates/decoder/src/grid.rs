@@ -260,11 +260,13 @@ impl Dp {
     }
 }
 
-/// Decodes exactly `count` digits that end the best-scoring path through the whole trace.
+/// Decodes exactly `count` digits that end the best-scoring path through the whole trace. `count` is clamped to
+/// `DIGITS_PER_RECORD`: the table has one row per digit, so a larger count only costs memory.
 pub fn decode_grid(db: &[i8], count: usize, timing: &Timing) -> Option<GridDecode> {
     if count == 0 {
         return None;
     }
+    let count = count.min(DIGITS_PER_RECORD);
     let dp = Dp::new(db, count, timing)?;
     let row = &dp.best[count * dp.stride..(count + 1) * dp.stride];
     let mut end = None;
@@ -279,10 +281,12 @@ pub fn decode_grid(db: &[i8], count: usize, timing: &Timing) -> Option<GridDecod
 /// Same Viterbi table as `decode_grid`, but the number of digits is free (1..=`max_count`): the best total score
 /// over (digit count, end frame) picks the prefix the audio supports, because a digit placed on frames without tone
 /// adds a negative score. For a live preview while a transmission is still arriving. `None` when nothing scores above 0.
+/// `max_count` is clamped to `DIGITS_PER_RECORD`.
 pub fn decode_prefix(db: &[i8], timing: &Timing, max_count: usize) -> Option<GridDecode> {
     if max_count == 0 {
         return None;
     }
+    let max_count = max_count.min(DIGITS_PER_RECORD);
     let dp = Dp::new(db, max_count, timing)?;
     let mut pick: Option<(usize, usize)> = None;
     let mut top = 0.0;

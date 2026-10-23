@@ -434,3 +434,32 @@ fn loose_records_are_capped_and_the_oldest_is_dropped() {
     assert_eq!(l.add(&loose(299)).count, 2, "a recent entry is kept");
     assert_eq!(l.add(&loose(0)).count, 1, "the oldest entry was dropped");
 }
+
+// ---- group 7: small fixes ----
+
+#[test]
+fn counts_above_a_record_are_clamped_to_ten_digits() {
+    let pcm = render(&one_record("4821", 1)).pcm;
+    let lv = levels_of(&pcm);
+    let want = decode_grid(&lv, DIGITS_PER_RECORD, &SHIPPED_TIMING).expect("ten digits");
+    assert_eq!(want.digits.len(), 10);
+    assert_eq!(decode_grid(&lv, 100_000, &SHIPPED_TIMING), Some(want));
+    let pre = decode_prefix(&lv, &SHIPPED_TIMING, DIGITS_PER_RECORD).expect("prefix");
+    assert_eq!(decode_prefix(&lv, &SHIPPED_TIMING, 100_000), Some(pre));
+    assert_eq!(decode_grid(&lv, 0, &SHIPPED_TIMING), None);
+}
+
+#[test]
+fn one_long_push_decodes_a_message_in_its_first_minute() {
+    let mut pcm = render(&one_record("4821", 1)).pcm;
+    pcm.resize(44100 * 400, 0);
+    let mut one = Pipeline::new();
+    let mut got = one.push(&pcm).bursts;
+    got.extend(one.flush());
+    let mut chunked = Pipeline::new();
+    let mut want: Vec<_> = chunks(&pcm).flat_map(|c| chunked.push(c).bursts).collect();
+    want.extend(chunked.flush());
+    assert_eq!(want.len(), 1);
+    assert_eq!(want[0].records.len(), 1);
+    assert_eq!(got, want, "note: {:?}", got.first().map(|b| &b.note));
+}
