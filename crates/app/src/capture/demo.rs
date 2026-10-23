@@ -41,14 +41,14 @@ mod tests {
     fn the_clip_repeats_after_a_silent_gap_until_stopped() {
         let (tx, rx) = std::sync::mpsc::sync_channel(CHANNEL_CAPACITY);
         let stop = Arc::new(AtomicBool::new(false));
-        let clip = vec![1000i16; SAMPLE_RATE as usize];
-        let cycle = clip.len() + GAP_S * SAMPLE_RATE as usize;
+        let clip = vec![1000i16; SAMPLE_RATE];
+        let cycle = clip.len() + GAP_S * SAMPLE_RATE;
         let flag = stop.clone();
         let player = std::thread::spawn(move || {
             play(clip, 200.0, Sink::new(0, tx), flag);
         });
         let mut heard = Vec::new();
-        while heard.len() < 2 * cycle + SAMPLE_RATE as usize {
+        while heard.len() < 2 * cycle + SAMPLE_RATE {
             if let Event::Samples(pcm) = rx.recv().expect("player ended early").event {
                 heard.extend(pcm);
             }
@@ -56,12 +56,8 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         drop(rx);
         player.join().expect("player thread");
-        assert!(heard[..SAMPLE_RATE as usize].iter().all(|&s| s == 1000));
-        assert!(heard[SAMPLE_RATE as usize..cycle].iter().all(|&s| s == 0));
-        assert!(
-            heard[cycle..cycle + SAMPLE_RATE as usize]
-                .iter()
-                .all(|&s| s == 1000)
-        );
+        assert!(heard[..SAMPLE_RATE].iter().all(|&s| s == 1000));
+        assert!(heard[SAMPLE_RATE..cycle].iter().all(|&s| s == 0));
+        assert!(heard[cycle..cycle + SAMPLE_RATE].iter().all(|&s| s == 1000));
     }
 }

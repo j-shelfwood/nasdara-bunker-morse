@@ -5,8 +5,8 @@ use egui::{
 };
 use nasdara_decoder::bunkers::{MAP_SIZE, bunkers, is_izurvive_url};
 
-use super::UiState;
 use super::widgets::{ButtonKind, button, caption, paint_check, paint_question};
+use super::{UiState, island};
 use crate::engine::{Card, Shared};
 use crate::theme::{self, AMBER, DIM, FAINT, RED, RULE, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
@@ -357,6 +357,18 @@ pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
         )
     };
 
+    let outline = |loops: &[&[(f32, f32)]], stroke: Stroke| {
+        for l in loops {
+            let points = l
+                .iter()
+                .map(|&(x, z)| to_screen(f64::from(x), f64::from(z)))
+                .collect();
+            p.add(egui::Shape::closed_line(points, stroke));
+        }
+    };
+    outline(island::BUILT_UP, Stroke::new(1.0, alpha(FAINT, 0.3)));
+    outline(island::COAST, Stroke::new(1.4, alpha(DIM, 0.65)));
+
     let hovered = response.hover_pos();
     let mut hint = None;
     for b in bunkers() {
@@ -407,5 +419,31 @@ pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
     }
     if let Some(h) = hint {
         response.on_hover_text(h);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inside(loop_: &[(f32, f32)], x: f32, z: f32) -> bool {
+        let mut hit = false;
+        for (i, &(ax, az)) in loop_.iter().enumerate() {
+            let (bx, bz) = loop_[(i + 1) % loop_.len()];
+            if (az > z) != (bz > z) && x < ax + (z - az) / (bz - az) * (bx - ax) {
+                hit = !hit;
+            }
+        }
+        hit
+    }
+
+    #[test]
+    fn every_bunker_lies_on_the_outlined_land() {
+        for b in bunkers() {
+            let land = island::COAST
+                .iter()
+                .any(|l| inside(l, b.x as f32, b.z as f32));
+            assert!(land, "bunker {} is outside the island outline", b.index);
+        }
     }
 }

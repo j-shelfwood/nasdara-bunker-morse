@@ -74,3 +74,10 @@ Wind alone never produced a false transmission in tests.
 - Other servers use the shipped playback timings. A server that changes them needs a matching `Timing` in
   `crates/decoder/src/grid.rs`.
 - Anything beyond one PC and one session (other radios, other audio stacks) is untested.
+
+## The minimap outline
+
+The coast and built-up outlines on the minimap are not a map of the island. `tools/nasdara-outline.ts` counts the
+positions of the island's buildings and spawn zones into a coarse grid, blurs it, cuts it at two densities and traces the
+edges, so the outline follows where things are built, not the true shoreline. Only the traced loops are kept, in
+`crates/app/src/ui/island.rs`. A test checks that all 23 bunkers fall inside the coast outline.
