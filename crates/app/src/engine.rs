@@ -99,6 +99,8 @@ pub struct Shared {
     /// Cards that appeared or changed since the window last looked.
     pub changed: Vec<String>,
     pub demo_done: bool,
+    /// `false` once the engine thread has ended for any reason, a panic included; nothing updates after that.
+    pub engine_alive: bool,
 }
 
 impl Shared {
@@ -121,6 +123,7 @@ impl Shared {
             silent_for: 0.0,
             changed: Vec::new(),
             demo_done: false,
+            engine_alive: true,
         }
     }
 
@@ -230,6 +233,10 @@ impl Engine {
     }
 
     fn run(mut self, commands: Receiver<Command>) {
+        let _alive = AliveGuard {
+            shared: self.shared.clone(),
+            ctx: self.ctx.clone(),
+        };
         let (tx, events) = mpsc::sync_channel(CHANNEL_CAPACITY);
         self.restart(&tx);
         loop {
@@ -576,6 +583,22 @@ impl Engine {
     }
 }
 
+/// Marks the engine as gone when its thread ends, on any path.
+struct AliveGuard {
+    shared: Arc<Mutex<Shared>>,
+    ctx: egui::Context,
+}
+
+impl Drop for AliveGuard {
+    fn drop(&mut self) {
+        self.shared
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .engine_alive = false;
+        self.ctx.request_repaint();
+    }
+}
+
 const MAX_NOTES: usize = 4;
 
 fn trim_notes(notes: &mut Vec<Note>) {
@@ -776,5 +799,27 @@ mod tests {
         e.event(msg(1, Event::SessionEnded));
         e.event(msg(1, Event::Discontinuity(1)));
         assert_eq!(e.lock().notes.len(), 2);
+    }
+
+    #[test]
+    fn a_dying_engine_thread_clears_engine_alive() {
+        let shared = Arc::new(Mutex::new(Shared::new(Source::Game)));
+        assert!(shared.lock().unwrap().engine_alive);
+        let guard = AliveGuard {
+            shared: shared.clone(),
+            ctx: egui::Context::default(),
+        };
+        let died = std::thread::spawn(move || {
+            let _guard = guard;
+            panic!("engine test panic");
+        })
+        .join();
+        assert!(died.is_err());
+        assert!(
+            !shared
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .engine_alive
+        );
     }
 }

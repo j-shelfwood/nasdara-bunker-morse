@@ -49,6 +49,7 @@ fn options() -> Options {
 }
 
 pub fn run() -> eframe::Result {
+    install_panic_hook();
     let opts = options();
     if let Some(report) = &opts.gpu_check {
         gpu_check(report);
@@ -141,6 +142,52 @@ fn report_failure(message: &str) {
     eprintln!("{message}");
 }
 
+/// Release builds abort on panic and the exe has no console, so without this the window would just vanish.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        previous(info);
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "no message".into());
+        let location = info.location().map_or_else(
+            || "unknown".into(),
+            |l| format!("{}:{}", l.file(), l.line()),
+        );
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_owned();
+        let text = crash_report(&message, &location, &thread);
+        let dir = eframe::storage_dir(APP_ID).unwrap_or_else(std::env::temp_dir);
+        let shown = match write_crash(&dir, &text) {
+            Some(path) => format!("\n\nDetails were saved to {}", path.display()),
+            None => String::new(),
+        };
+        report_failure(&format!(
+            "Bunker Morse stopped because of an internal error.\n\n{message}{shown}"
+        ));
+    }));
+}
+
+/// Message and location only: no audio, no decoded data.
+fn crash_report(message: &str, location: &str, thread: &str) -> String {
+    format!(
+        "Bunker Morse {} crashed\nthread: {thread}\nlocation: {location}\nmessage: {message}\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+/// Writes `crash.txt` into `dir` (created when missing), falling back to nothing when the disk refuses.
+fn write_crash(dir: &std::path::Path, text: &str) -> Option<PathBuf> {
+    let _ = std::fs::create_dir_all(dir);
+    let path = dir.join("crash.txt");
+    std::fs::write(&path, text).ok().map(|()| path)
+}
+
 struct App {
     engine: Handle,
     st: UiState,
@@ -203,4 +250,23 @@ fn gpu_check(report: &PathBuf) {
         text += &format!("{:?} | {} | {:?}\n", i.backend, i.name, i.device_type);
     }
     let _ = std::fs::write(report, text);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_crash_file_holds_message_and_location_and_lands_in_the_directory() {
+        let dir = std::env::temp_dir().join(format!("bunker-morse-crash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let text = crash_report("index out of bounds", "src/engine.rs:42", "engine");
+        let path = write_crash(&dir.join("nested"), &text).expect("written");
+        let read = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(path.ends_with("crash.txt"));
+        assert!(read.contains("message: index out of bounds"), "{read}");
+        assert!(read.contains("location: src/engine.rs:42"), "{read}");
+        assert!(read.contains("thread: engine"), "{read}");
+    }
 }
