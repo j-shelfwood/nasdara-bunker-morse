@@ -2,63 +2,13 @@ use egui::{
     Align2, Color32, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
 };
 
-use crate::theme::{self, AMBER, DIM, RULE, STROKE, SURFACE, SURFACE_HI, TEXT, alpha};
-
-pub fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    egui::Frame::new()
-        .fill(SURFACE)
-        .stroke(Stroke::new(1.0, STROKE))
-        .corner_radius(14.0)
-        .inner_margin(egui::Margin::symmetric(20, 16))
-        .show(ui, add);
-}
-
-/// Small uppercase caption in the dim colour, with the letter spacing a label needs.
-pub fn caption(ui: &mut Ui, text: &str) {
-    let galley = ui
-        .painter()
-        .layout_no_wrap(spaced(text), theme::bold(11.0), DIM);
-    let (rect, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    ui.painter().galley(rect.min, galley, DIM);
-}
-
-pub fn spaced(text: &str) -> String {
-    let mut out = String::new();
-    for (i, c) in text.to_uppercase().chars().enumerate() {
-        if i > 0 {
-            out.push('\u{200a}');
-        }
-        out.push(c);
-    }
-    out
-}
-
-pub fn paint_caption(
-    painter: &egui::Painter,
-    pos: Pos2,
-    align: Align2,
-    text: &str,
-    color: Color32,
-) {
-    painter.text(pos, align, spaced(text), theme::bold(11.0), color);
-}
+use super::focus_ring;
+use crate::theme::{self, AMBER, DIM, RULE, STROKE, SURFACE_HI, TEXT, alpha};
 
 pub struct Pill {
     pub dot: Color32,
     pub pulse: f32,
     pub label: String,
-}
-
-/// A 2 px ring around a widget that has keyboard focus.
-pub fn focus_ring(painter: &egui::Painter, response: &Response, radius: f32) {
-    if response.has_focus() {
-        painter.rect_stroke(
-            response.rect.expand(1.0),
-            radius + 1.0,
-            Stroke::new(2.0, TEXT),
-            StrokeKind::Outside,
-        );
-    }
 }
 
 /// Rounded status chip with a coloured dot; `pulse` (0..1) breathes a halo around the dot.
@@ -170,48 +120,6 @@ pub fn icon_button(
     response.on_hover_text(tip)
 }
 
-/// A switch with its label to the right. `still` skips the slide of the knob.
-pub fn toggle(ui: &mut Ui, value: &mut bool, label: &str, still: bool) -> Response {
-    const TRACK: Vec2 = Vec2::new(34.0, 18.0);
-    let galley = ui
-        .painter()
-        .layout_no_wrap(label.into(), theme::text(13.0), TEXT);
-    let size = Vec2::new(TRACK.x + 10.0 + galley.size().x, 28.0);
-    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
-    if response.clicked() {
-        *value = !*value;
-        response.mark_changed();
-    }
-    let on = *value;
-    let t = ui
-        .ctx()
-        .animate_bool_with_time(response.id, on, if still { 0.0 } else { 0.12 });
-    let track = Rect::from_min_size(rect.left_center() - Vec2::new(0.0, TRACK.y / 2.0), TRACK);
-    let p = ui.painter();
-    p.rect_filled(
-        track,
-        TRACK.y / 2.0,
-        theme::mix(if response.hovered() { RULE } else { STROKE }, AMBER, t),
-    );
-    let knob_x = track.left() + TRACK.y / 2.0 + t * (TRACK.x - TRACK.y);
-    p.circle_filled(
-        Pos2::new(knob_x, track.center().y),
-        TRACK.y / 2.0 - 3.0,
-        theme::mix(TEXT, Color32::from_rgb(0x1a, 0x12, 0x02), t),
-    );
-    p.galley(
-        Pos2::new(
-            track.right() + 10.0,
-            rect.center().y - galley.size().y / 2.0,
-        ),
-        galley,
-        TEXT,
-    );
-    focus_ring(p, &response, 9.0);
-    response.widget_info(|| WidgetInfo::selected(Role::Switch, true, on, label));
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
 pub enum ButtonKind {
     Primary,
     Quiet,
@@ -253,69 +161,4 @@ pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
     focus_ring(ui.painter(), &response, 9.0);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// Width of `symbols` drawn at scale 1.
-pub fn symbols_width(symbols: &str) -> f32 {
-    let dashes = symbols.chars().filter(|&c| c == '-').count() as f32;
-    let all = symbols.chars().count() as f32;
-    dashes * 12.0 + (all - dashes) * 4.4 + 3.6 * (all - 1.0).max(0.0)
-}
-
-/// Morse symbols as small shapes: `.` a dot, `-` a dash.
-pub fn paint_symbols(
-    painter: &egui::Painter,
-    center: Pos2,
-    symbols: &str,
-    scale: f32,
-    color: Color32,
-) {
-    paint_symbols_with(painter, center, symbols, scale, |_| color);
-}
-
-/// Like `paint_symbols`, with a colour chosen per symbol by its position.
-pub fn paint_symbols_with(
-    painter: &egui::Painter,
-    center: Pos2,
-    symbols: &str,
-    scale: f32,
-    color: impl Fn(usize) -> Color32,
-) {
-    let (dot, dash, gap) = (4.4 * scale, 12.0 * scale, 3.6 * scale);
-    let widths: Vec<f32> = symbols
-        .chars()
-        .map(|c| if c == '-' { dash } else { dot })
-        .collect();
-    let total = widths.iter().sum::<f32>() + gap * (widths.len().saturating_sub(1)) as f32;
-    let mut x = center.x - total / 2.0;
-    for (i, w) in widths.into_iter().enumerate() {
-        let r = Rect::from_min_size(Pos2::new(x, center.y - dot / 2.0), Vec2::new(w, dot));
-        painter.rect_filled(r, dot / 2.0, color(i));
-        x += w + gap;
-    }
-}
-
-/// A check mark drawn from two segments, so it does not depend on the font having the glyph.
-pub fn paint_check(painter: &egui::Painter, center: Pos2, size: f32, color: Color32, width: f32) {
-    let u = size / 2.0;
-    painter.add(egui::Shape::line(
-        vec![
-            center + Vec2::new(-0.55 * u, 0.05 * u),
-            center + Vec2::new(-0.15 * u, 0.5 * u),
-            center + Vec2::new(0.6 * u, -0.45 * u),
-        ],
-        Stroke::new(width, color),
-    ));
-}
-
-/// A bold question mark inside a ring: the "unclear" mark.
-pub fn paint_question(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
-    painter.circle_stroke(center, size / 2.0 - 1.0, Stroke::new(1.8, color));
-    painter.text(
-        center,
-        Align2::CENTER_CENTER,
-        "?",
-        theme::bold(size * 0.62),
-        color,
-    );
 }
