@@ -215,3 +215,28 @@ pub fn paint_symbols(
         x += w + gap;
     }
 }
+
+/// A check mark drawn from two segments, so it does not depend on the font having the glyph.
+pub fn paint_check(painter: &egui::Painter, center: Pos2, size: f32, color: Color32, width: f32) {
+    let u = size / 2.0;
+    painter.add(egui::Shape::line(
+        vec![
+            center + Vec2::new(-0.55 * u, 0.05 * u),
+            center + Vec2::new(-0.15 * u, 0.5 * u),
+            center + Vec2::new(0.6 * u, -0.45 * u),
+        ],
+        Stroke::new(width, color),
+    ));
+}
+
+/// A bold question mark inside a ring: the "unclear" mark.
+pub fn paint_question(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
+    painter.circle_stroke(center, size / 2.0 - 1.0, Stroke::new(1.8, color));
+    painter.text(
+        center,
+        Align2::CENTER_CENTER,
+        "?",
+        theme::bold(size * 0.62),
+        color,
+    );
+}

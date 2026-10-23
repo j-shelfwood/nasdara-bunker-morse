@@ -6,7 +6,7 @@ use nasdara_decoder::bunkers::{MAP_SIZE, bunkers, is_izurvive_url};
 use super::UiState;
 use super::widgets::{ButtonKind, button, caption};
 use crate::engine::{Card, Shared};
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, RED, STROKE, SURFACE_HI, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RED, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const CARD_W: f32 = 296.0;
 
@@ -70,7 +70,7 @@ fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
     let stroke = if selected {
         alpha(AMBER, 0.7)
     } else {
-        theme::mix(STROKE, GREEN, fresh * 0.8)
+        theme::mix(STROKE, TEAL, fresh * 0.8)
     };
     let frame = egui::Frame::new()
         .fill(SURFACE_HI)
@@ -189,7 +189,7 @@ fn status_line(ui: &mut Ui, c: &Card) {
             ),
         )
     } else if c.count >= 2 {
-        (GREEN, format!("Confirmed over {} transmissions", c.count))
+        (TEAL, format!("Confirmed over {} transmissions", c.count))
     } else {
         (
             AMBER,

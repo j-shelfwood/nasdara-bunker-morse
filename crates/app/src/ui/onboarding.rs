@@ -3,7 +3,7 @@
 use egui::{Align2, Area, Color32, Order, Pos2, Rect, RichText, Sense, Stroke, Ui, Vec2};
 
 use super::widgets::{ButtonKind, button, paint_symbols};
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, STROKE, SURFACE, SURFACE_HI, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, STROKE, SURFACE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const PAGES: usize = 3;
 
@@ -212,7 +212,7 @@ fn radio_scene(p: &egui::Painter, rect: Rect, t: f32) {
     p.rect_filled(
         Rect::from_center_size(body.center() + Vec2::new(16.0, -8.0), Vec2::new(18.0, 6.0)),
         2.0,
-        alpha(GREEN, 0.5 + 0.4 * (t * 2.0).sin().abs()),
+        alpha(TEAL, 0.5 + 0.4 * (t * 2.0).sin().abs()),
     );
     // waves from a bunker on the right travelling to the radio
     let origin = Pos2::new(rect.center().x + 150.0, rect.center().y + 10.0);
@@ -255,7 +255,7 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
     p.rect_stroke(
         boxr,
         12.0,
-        Stroke::new(1.5, alpha(GREEN, 0.6)),
+        Stroke::new(1.5, alpha(TEAL, 0.6)),
         egui::StrokeKind::Inside,
     );
     p.text(c, Align2::CENTER_CENTER, "your PC", theme::bold(15.0), TEXT);

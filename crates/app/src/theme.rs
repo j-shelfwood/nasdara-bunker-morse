@@ -11,7 +11,7 @@ pub const TEXT: Color32 = Color32::from_rgb(0xe6, 0xea, 0xf0);
 pub const DIM: Color32 = Color32::from_rgb(0x8b, 0x95, 0xa4);
 pub const FAINT: Color32 = Color32::from_rgb(0x4b, 0x54, 0x62);
 pub const AMBER: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
-pub const GREEN: Color32 = Color32::from_rgb(0x4a, 0xde, 0x9a);
+pub const TEAL: Color32 = Color32::from_rgb(0x3d, 0xdb, 0xd9);
 pub const RED: Color32 = Color32::from_rgb(0xff, 0x6b, 0x57);
 pub const BLUE: Color32 = Color32::from_rgb(0x5a, 0xa9, 0xff);
 

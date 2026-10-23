@@ -9,7 +9,7 @@ use nasdara_decoder::morse::pattern_of;
 
 use super::slots::DASH_FROM_S;
 use crate::engine::Shared;
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, STROKE, SURFACE_HI, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const WINDOW_S: f64 = 24.0;
 /// Space kept right of "now" so a starting beep is visible.
@@ -116,7 +116,7 @@ pub fn show(ui: &mut Ui, s: &Shared) {
         let f = fade(x0.max(x1.min(x0 + 1.0)));
         let y = mid + 24.0;
         let unreadable = ch == '?';
-        let c = if unreadable { theme::RED } else { GREEN };
+        let c = if unreadable { theme::RED } else { TEAL };
         painter.line_segment(
             [
                 Pos2::new(x0.max(rect.left() + 6.0), y),

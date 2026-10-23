@@ -1,9 +1,11 @@
 mod cards;
+mod latest;
 mod onboarding;
 mod signal;
 mod slots;
 mod widgets;
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use egui::{
@@ -14,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capture::{Source, Status};
 use crate::engine::{Command, Handle, Mode, Note, Shared};
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, RED, STROKE, SURFACE, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RED, STROKE, SURFACE, TEAL, alpha};
 use widgets::{ButtonKind, Pill, button, caption, card, pill, segmented};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -42,7 +44,9 @@ impl Default for Settings {
 pub struct UiState {
     pub settings: Settings,
     pub onboarding: Option<usize>,
-    slot_seen: [(Option<char>, f64); 10],
+    slot_seen: [slots::SlotSeen; 10],
+    /// Grid and lock code last seen per card key, so only a new or changed card raises attention.
+    card_seen: HashMap<String, (String, String)>,
     copied: Option<(String, Instant)>,
     selected: Option<String>,
     on_top_sent: Option<bool>,
@@ -55,7 +59,8 @@ impl UiState {
         UiState {
             settings,
             onboarding,
-            slot_seen: [(None, 0.0); 10],
+            slot_seen: [slots::SlotSeen::default(); 10],
+            card_seen: HashMap::new(),
             copied: None,
             selected: None,
             on_top_sent: None,
@@ -146,20 +151,31 @@ fn finish_onboarding(st: &mut UiState) {
     st.settings.onboarded = true;
 }
 
-fn react_to_new_bunkers(ctx: &egui::Context, st: &UiState, s: &mut Shared) {
+fn react_to_new_bunkers(ctx: &egui::Context, st: &mut UiState, s: &mut Shared) {
+    st.card_seen
+        .retain(|key, _| s.cards.iter().any(|c| &c.key == key));
     for key in std::mem::take(&mut s.changed) {
-        if st.settings.flash_taskbar {
-            ctx.send_viewport_cmd(ViewportCommand::RequestUserAttention(
-                UserAttentionType::Informational,
-            ));
+        let Some(card) = s.cards.iter().find(|c| c.key == key) else {
+            continue;
+        };
+        let now = (card.grid.clone(), card.code.clone());
+        let previous = st.card_seen.insert(key, now.clone());
+        let is_new = previous.is_none();
+        if !is_new && previous.as_ref() == Some(&now) {
+            continue;
         }
-        let url = s
-            .cards
-            .iter()
-            .find(|c| c.key == key && c.count == 1)
-            .and_then(|c| c.url.clone());
-        if let (true, Some(url)) = (st.settings.open_map_for_new, url)
-            && nasdara_decoder::bunkers::is_izurvive_url(&url)
+        if st.settings.flash_taskbar {
+            ctx.send_viewport_cmd(ViewportCommand::RequestUserAttention(if is_new {
+                UserAttentionType::Critical
+            } else {
+                UserAttentionType::Informational
+            }));
+        }
+        if let (true, true, Some(url)) = (
+            st.settings.open_map_for_new,
+            card.count == 1,
+            card.url.as_deref(),
+        ) && nasdara_decoder::bunkers::is_izurvive_url(url)
         {
             let _ = open::that(url);
         }
@@ -269,7 +285,7 @@ fn status_chip(s: &Shared, time: f32) -> (String, egui::Color32, f32) {
             } else {
                 "Listening to system audio".into()
             },
-            GREEN,
+            TEAL,
             breathe(0.5),
         ),
         Status::WaitingForGame => ("Waiting for DayZ".into(), FAINT, 0.0),
@@ -326,6 +342,7 @@ fn live_card(ui: &mut Ui, st: &mut UiState, s: &Shared) {
     card(ui, |ui| {
         ui.set_width(ui.available_width());
         let v = slots::view(s);
+        latest::show(ui, st, s);
         ui.horizontal(|ui| {
             ui.label(RichText::new(&v.headline).font(theme::bold(15.0)));
         });
@@ -381,7 +398,7 @@ fn footer(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, Vec2::new(rect.width() * level, rect.height())),
             4.0,
-            if level > 0.02 { GREEN } else { FAINT },
+            if level > 0.02 { TEAL } else { FAINT },
         );
         ui.label(
             RichText::new("Audio level")
