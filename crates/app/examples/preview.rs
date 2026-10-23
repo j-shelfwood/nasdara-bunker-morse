@@ -33,8 +33,14 @@ fn main() {
         );
 
     if marks.is_empty() {
+        for page in 0..3 {
+            harness.state_mut().1.onboarding = Some(page);
+            harness.run_steps(8);
+            save(&mut harness, &out.join(format!("onboarding-{page}.png")));
+        }
+        harness.state_mut().1.onboarding = None;
         harness.run_steps(8);
-        save(&mut harness, &out.join("onboarding.png"));
+        save(&mut harness, &out.join("idle.png"));
         return;
     }
     engine.send(Command::StartDemo);

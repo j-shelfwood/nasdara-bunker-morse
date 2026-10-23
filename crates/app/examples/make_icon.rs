@@ -11,7 +11,12 @@ fn main() {
         .map(|&px| {
             let mut png = Vec::new();
             PngEncoder::new(Cursor::new(&mut png))
-                .write_image(&nasdara_bunker_morse::logo::rasterize(px), px as u32, px as u32, image::ExtendedColorType::Rgba8)
+                .write_image(
+                    &nasdara_bunker_morse::logo::rasterize(px),
+                    px as u32,
+                    px as u32,
+                    image::ExtendedColorType::Rgba8,
+                )
                 .expect("png");
             png
         })

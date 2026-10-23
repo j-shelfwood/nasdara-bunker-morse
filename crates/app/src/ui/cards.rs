@@ -17,12 +17,16 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
     }
     let mut cards: Vec<&Card> = s.cards.iter().collect();
     cards.sort_by_key(|c| std::cmp::Reverse(c.updated));
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::splat(12.0);
-        for c in cards {
-            card(ui, st, c);
-        }
-    });
+    let gap = 12.0;
+    let per_row = (((ui.available_width() + gap) / (CARD_W + gap)).floor() as usize).max(1);
+    ui.spacing_mut().item_spacing = Vec2::splat(gap);
+    for row in cards.chunks(per_row) {
+        ui.horizontal_top(|ui| {
+            for c in row {
+                card(ui, st, c);
+            }
+        });
+    }
 }
 
 fn empty(ui: &mut Ui) {

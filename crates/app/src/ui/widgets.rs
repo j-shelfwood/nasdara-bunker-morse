@@ -187,6 +187,13 @@ pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// Width of `symbols` drawn at scale 1.
+pub fn symbols_width(symbols: &str) -> f32 {
+    let dashes = symbols.chars().filter(|&c| c == '-').count() as f32;
+    let all = symbols.chars().count() as f32;
+    dashes * 12.0 + (all - dashes) * 4.4 + 3.6 * (all - 1.0).max(0.0)
+}
+
 /// Morse symbols as small shapes: `.` a dot, `-` a dash.
 pub fn paint_symbols(
     painter: &egui::Painter,

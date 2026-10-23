@@ -1,0 +1,28 @@
+name: Bug report
+description: Something did not decode, or the app misbehaved
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Audio source
+      options:
+        - DayZ
+        - System audio
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Decoder log (optional)
+      description: Start the app with `--log decode.log --trace` and paste the relevant lines. The log holds beep timings and digits, no audio.
+  - type: input
+    id: version
+    attributes:
+      label: App version and Windows version

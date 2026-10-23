@@ -356,6 +356,7 @@ fn bunkers_card(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
             let list_w = (ui.available_width() - map_side - 16.0).max(320.0);
             ui.vertical(|ui| {
                 ui.set_width(list_w);
+                ui.set_max_width(list_w);
                 cards::show(ui, st, s);
             });
             cards::map(ui, st, s, map_side);

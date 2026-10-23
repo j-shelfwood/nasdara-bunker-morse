@@ -1,0 +1,43 @@
+name: release
+
+# Push a tag such as v0.1.0. The exe is built here, from the tagged source, and attached to a GitHub release
+# together with its SHA-256 and a build provenance attestation.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo build --release -p nasdara-bunker-morse
+      - name: Name the artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $name = "bunker-morse-${{ github.ref_name }}-windows-x64.exe"
+          Copy-Item target\release\nasdara-bunker-morse.exe "dist\$name"
+          $hash = (Get-FileHash "dist\$name" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii dist\SHA256SUMS.txt
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/bunker-morse-*.exe
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bunker-morse-*.exe
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

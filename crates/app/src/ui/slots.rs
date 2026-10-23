@@ -5,7 +5,7 @@ use nasdara_decoder::grid::SHIPPED_TIMING;
 use nasdara_decoder::morse::pattern_of;
 
 use super::UiState;
-use super::widgets::{paint_caption, paint_symbols};
+use super::widgets::{paint_caption, paint_symbols, symbols_width};
 use crate::engine::Shared;
 use crate::theme::{self, AMBER, DIM, FAINT, GREEN, RED, STROKE, SURFACE_HI, TEXT, alpha};
 
@@ -302,11 +302,12 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
                     );
                 }
             } else {
+                let scale = 1.5_f32.min((rect.width() - 16.0) / symbols_width(live));
                 paint_symbols(
                     painter,
                     Pos2::new(rect.center().x, digit_y),
                     live,
-                    1.5,
+                    scale,
                     AMBER,
                 );
             }
