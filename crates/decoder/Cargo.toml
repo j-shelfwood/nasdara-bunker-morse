@@ -4,5 +4,8 @@ description = "Decodes the Nasdara bunker Morse broadcast from a mono audio stre
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
 
 [dependencies]
