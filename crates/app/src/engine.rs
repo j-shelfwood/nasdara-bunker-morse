@@ -131,7 +131,8 @@ impl Shared {
 
     /// A transmission is coming in: beeps heard recently and enough of them to be a message.
     pub fn receiving(&self) -> bool {
-        self.burst_beeps >= 4
+        self.status == Status::Listening
+            && self.burst_beeps >= 4
             && self
                 .beeps
                 .back()
@@ -240,11 +241,7 @@ impl Engine {
     fn restart(&mut self, tx: &Sender<Message>) {
         self.capture = None;
         self.generation += 1;
-        self.pipeline = Pipeline::new();
-        self.tone_on = false;
-        self.open = None;
-        self.last_beep_end = f64::NEG_INFINITY;
-        self.silent_samples = 0;
+        self.reset_stream();
         let (mode, speed) = (
             self.mode,
             if self.mode == Mode::Demo {
@@ -280,6 +277,42 @@ impl Engine {
                 tx.clone(),
             ),
         });
+        self.ctx.request_repaint();
+    }
+
+    /// A fresh decoder and beep tracker for a new stream.
+    fn reset_stream(&mut self) {
+        self.pipeline = Pipeline::new();
+        self.tone_on = false;
+        self.open = None;
+        self.last_beep_end = f64::NEG_INFINITY;
+        self.silent_samples = 0;
+    }
+
+    /// The capture ended: close what is open, hand the decoder's pending burst through the normal path and start a
+    /// new stream, so nothing stays frozen on the old clock until the next session.
+    fn session_ended(&mut self) {
+        {
+            let shared = self.shared.clone();
+            let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
+            let t = s.clock;
+            self.close_beep(&mut s, t);
+        }
+        let bursts = self.pipeline.flush();
+        self.bursts(bursts);
+        {
+            let mut s = self.lock();
+            s.frames.clear();
+            s.beeps.clear();
+            s.burst_beeps = 0;
+            s.preview = None;
+            s.clock = 0.0;
+            s.clock_at = Instant::now();
+            s.level = 0.0;
+            s.silent_for = 0.0;
+        }
+        self.reset_stream();
+        self.peak = 0.0;
         self.ctx.request_repaint();
     }
 
@@ -324,6 +357,7 @@ impl Engine {
                 self.ctx.request_repaint();
             }
             Event::Samples(pcm) => self.samples(&pcm),
+            Event::SessionEnded => self.session_ended(),
             Event::DemoFinished => {
                 // the demo clip ends in silence, so a final burst may still be open
                 let bursts = self.pipeline.flush();
@@ -405,9 +439,15 @@ impl Engine {
                     }
                 }
             }
-        } else if !on
-            && self.tone_on
-            && let Some(i) = self.open.take()
+        } else if !on && self.tone_on {
+            self.close_beep(s, t);
+        }
+        self.tone_on = on;
+    }
+
+    /// Ends the open beep at `t`; one shorter than a real beep is a glitch and disappears.
+    fn close_beep(&mut self, s: &mut Shared, t: f64) {
+        if let Some(i) = self.open.take()
             && let Some(b) = s.beeps.get_mut(i)
         {
             b.end = Some(t);
@@ -417,7 +457,7 @@ impl Engine {
                 s.burst_beeps = s.burst_beeps.saturating_sub(1);
             }
         }
-        self.tone_on = on;
+        self.tone_on = false;
     }
 
     fn bursts(&mut self, bursts: Vec<Burst>) {
@@ -612,5 +652,67 @@ mod tests {
             e.digest(&mut s, vec![unreadable()], &mut Vec::new());
         }
         assert_eq!(s.notes.len(), MAX_NOTES);
+    }
+
+    fn open_beep(e: &Engine, beeps: usize) {
+        let mut s = e.lock();
+        s.status = Status::Listening;
+        s.clock = 10.0;
+        s.burst_beeps = beeps;
+        for i in 0..beeps {
+            s.beeps.push_back(Beep {
+                start: 1.0 + i as f64,
+                end: if i + 1 == beeps {
+                    None
+                } else {
+                    Some(1.5 + i as f64)
+                },
+            });
+        }
+        s.preview = None;
+    }
+
+    #[test]
+    fn receiving_needs_a_listening_status() {
+        let e = engine(0);
+        open_beep(&e, 5);
+        assert!(e.lock().receiving());
+        e.lock().status = Status::WaitingForGame;
+        assert!(!e.lock().receiving());
+    }
+
+    #[test]
+    fn a_ended_session_closes_the_open_beep_and_starts_a_clean_stream() {
+        let mut e = engine(1);
+        open_beep(&e, 5);
+        e.open = Some(4);
+        e.tone_on = true;
+        e.event(msg(1, Event::SessionEnded));
+        let s = e.lock();
+        assert!(s.beeps.is_empty() && s.frames.is_empty());
+        assert_eq!(s.burst_beeps, 0);
+        assert!(s.preview.is_none());
+        assert!(!s.receiving());
+        drop(s);
+        assert!(e.open.is_none() && !e.tone_on);
+        assert_eq!(e.pipeline.pending(), 0);
+    }
+
+    #[test]
+    fn a_ended_session_flushes_the_pending_burst() {
+        let pcm = synth::demo_transmission(7);
+        // stop right after the last loud sample, before the silence that would end the burst by itself
+        let end = pcm.iter().rposition(|s| s.unsigned_abs() > 2000).unwrap();
+        let mut e = engine(1);
+        for c in synth::chunks(&pcm[..end]) {
+            e.event(msg(1, Event::Samples(c.to_vec())));
+        }
+        let heard: usize = e.lock().cards.iter().map(|c| c.count).sum();
+        e.event(msg(1, Event::SessionEnded));
+        let after: usize = e.lock().cards.iter().map(|c| c.count).sum();
+        assert!(
+            after > heard,
+            "heard {heard} before, {after} after the flush"
+        );
     }
 }

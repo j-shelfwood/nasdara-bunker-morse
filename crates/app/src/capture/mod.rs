@@ -36,6 +36,8 @@ pub enum Event {
     Samples(Vec<i16>),
     /// A demo clip ran to its end.
     DemoFinished,
+    /// The live capture ended (the game exited, the device failed); the stream stops here.
+    SessionEnded,
 }
 
 /// An event tagged with the session (generation) of the capture that produced it. The engine drops events of

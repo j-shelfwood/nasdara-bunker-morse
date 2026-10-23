@@ -54,6 +54,7 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
+                tx.send(Event::SessionEnded);
                 say(match ended {
                     Ended::ProcessGone => Status::WaitingForGame,
                     Ended::DeviceError(e) => Status::Failed(e),
