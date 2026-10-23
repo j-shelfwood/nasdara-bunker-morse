@@ -169,6 +169,39 @@ fn wind_under_the_message_does_not_change_a_digit() {
 }
 
 #[test]
+fn wind_far_above_half_a_beep_is_unreadable_but_never_wrong_or_false() {
+    let mut reported = 0;
+    let mut possible = 0;
+    for wind_gain in [6.0, 10.0, 25.0] {
+        for seed in [1, 2] {
+            let r = run(&SynthOptions {
+                wind_gain,
+                seed,
+                repeats: 1,
+                ..base()
+            });
+            possible += 3;
+            reported += r.records.len();
+            // no record the broadcast did not contain, no digit that was not sent, no snap to a bunker not heard
+            assert!(
+                r.records.iter().all(consistent),
+                "gain {wind_gain} seed {seed}: {:?}",
+                got(&r.records)
+            );
+            assert_eq!(wrong_snaps(&r.records), 0, "gain {wind_gain} seed {seed}");
+            assert!(r.records.len() <= 3, "gain {wind_gain} seed {seed}");
+            // a record that reads is allowed only with a snap that is none, inferred or exact on a heard bunker
+            for x in &r.records {
+                if let Some(b) = x.snap.bunker() {
+                    assert!(records().iter().any(|t| t.grid == b.grid));
+                }
+            }
+        }
+    }
+    assert!(reported < possible, "{reported} of {possible} records read");
+}
+
+#[test]
 fn pings_before_and_after_are_ignored() {
     use nasdara_decoder::synth::PingZone;
     let r = run(&SynthOptions {
