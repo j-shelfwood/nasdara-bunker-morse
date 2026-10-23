@@ -19,6 +19,9 @@ use crate::engine::{Command, Handle, Mode, Note, Shared};
 use crate::theme::{self, AMBER, DIM, FAINT, RED, STROKE, SURFACE, TEAL, alpha};
 use widgets::{ButtonKind, Pill, button, caption, card, pill, segmented};
 
+/// Smallest window the layout is built for, in points.
+pub const MIN_WINDOW: Vec2 = Vec2::new(760.0, 520.0);
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -50,6 +53,8 @@ pub struct UiState {
     copied: Option<(String, Instant)>,
     selected: Option<String>,
     on_top_sent: Option<bool>,
+    min_size_sent: bool,
+    window_fitted: bool,
     modal_ids: (egui::Id, egui::Id),
 }
 
@@ -64,6 +69,8 @@ impl UiState {
             copied: None,
             selected: None,
             on_top_sent: None,
+            min_size_sent: false,
+            window_fitted: false,
             modal_ids: (
                 egui::Id::unique("onboarding-backdrop"),
                 egui::Id::unique("onboarding"),
@@ -85,6 +92,7 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 
+    size_window(&ctx, st);
     react_to_new_bunkers(&ctx, st, &mut s);
     let on_top = st.settings.always_on_top;
     if st.on_top_sent != Some(on_top) {
@@ -143,6 +151,30 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
                 engine.send(Command::StartDemo);
             }
         }
+    }
+}
+
+/// The window opens at 1060x800 points whatever the monitor. On the first frame that knows the monitor size it is
+/// cut down to 90% of the monitor, and the minimum size drops so a short window still shows the result.
+fn size_window(ctx: &egui::Context, st: &mut UiState) {
+    const OPEN: Vec2 = Vec2::new(1060.0, 800.0);
+    if !st.min_size_sent {
+        st.min_size_sent = true;
+        ctx.send_viewport_cmd(ViewportCommand::MinInnerSize(MIN_WINDOW));
+    }
+    if st.window_fitted {
+        return;
+    }
+    let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) else {
+        return;
+    };
+    st.window_fitted = true;
+    let current = ctx
+        .input(|i| i.viewport().inner_rect)
+        .map_or(OPEN, |r| r.size());
+    let limit = (monitor * 0.9).max(MIN_WINDOW);
+    if current.x > limit.x || current.y > limit.y {
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(current.min(limit)));
     }
 }
 
@@ -319,16 +351,16 @@ fn banner(ui: &mut Ui, engine: &Handle, s: &Shared) {
             .corner_radius(10.0)
             .inner_margin(egui::Margin::symmetric(14, 9))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                // the label wraps and the button drops to the next line when the row is full
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(text)
                             .font(theme::text(13.0))
                             .color(theme::TEXT),
                     );
                     if let Some(a) = action {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            act = button(ui, a, ButtonKind::Quiet).clicked()
-                        });
+                        act = button(ui, a, ButtonKind::Quiet).clicked();
                     }
                 });
             });
@@ -339,18 +371,31 @@ fn banner(ui: &mut Ui, engine: &Handle, s: &Shared) {
 }
 
 fn live_card(ui: &mut Ui, st: &mut UiState, s: &Shared) {
+    let size = signal::Size::for_window_height(ui.ctx().content_rect().height());
     card(ui, |ui| {
         ui.set_width(ui.available_width());
         let v = slots::view(s);
-        latest::show(ui, st, s);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&v.headline).font(theme::bold(15.0)));
-        });
-        ui.label(RichText::new(&v.hint).font(theme::text(12.5)).color(DIM));
-        ui.add_space(4.0);
-        slots::show(ui, st, &v);
-        ui.add_space(6.0);
-        signal::show(ui, s);
+        let strip = latest::show(ui, st, s);
+        let compact = size.is_compact();
+        // a short window with a result on screen gives its height to the cards: the strip holds the digits,
+        // and the idle ribbon and the headline wait until the window grows or the next transmission starts
+        let squeezed = compact && strip;
+        if !squeezed {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&v.headline).font(theme::bold(15.0)));
+            });
+        }
+        if !compact {
+            ui.add(
+                egui::Label::new(RichText::new(&v.hint).font(theme::text(12.5)).color(DIM)).wrap(),
+            );
+            ui.add_space(4.0);
+        }
+        if !squeezed {
+            slots::show(ui, st, &v);
+            ui.add_space(6.0);
+            signal::show(ui, s, size);
+        }
     });
 }
 

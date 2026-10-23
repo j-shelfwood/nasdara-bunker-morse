@@ -17,7 +17,7 @@ fn main() {
     let out = PathBuf::from(args.next().unwrap_or_else(|| "preview".into()));
     let mut size = (1060.0_f32, 800.0_f32);
     let mut marks: Vec<f64> = Vec::new();
-    // `--result clear|unclear`: a synthetic finished transmission and a few cards (stand-ins, not decoded audio)
+    // `--result clear|unclear|silent`: a synthetic finished transmission and a few cards (stand-ins, not decoded audio)
     let mut result: Option<String> = None;
     while let Some(a) = args.next() {
         if a == "--size" {
@@ -55,7 +55,7 @@ fn main() {
         );
 
     if let Some(kind) = result {
-        scenario(&engine, kind == "unclear");
+        scenario(&engine, kind != "clear", kind == "silent");
         harness.run_steps(3);
         harness.run_steps(6);
         save(
@@ -90,7 +90,7 @@ fn main() {
     }
 }
 
-fn scenario(engine: &Handle, unclear: bool) {
+fn scenario(engine: &Handle, unclear: bool, silent: bool) {
     use nasdara_bunker_morse::capture::Status;
     use nasdara_bunker_morse::engine::{Card, Finished};
     use nasdara_decoder::bunkers::{bunkers, izurvive_url};
@@ -134,6 +134,7 @@ fn scenario(engine: &Handle, unclear: bool) {
         bunker: Some(17),
     });
     s.burst_beeps = 0;
+    s.silent_for = if silent { 34.0 } else { 0.0 };
 }
 
 fn save(harness: &mut Harness<'_, (Handle, UiState)>, path: &std::path::Path) {

@@ -52,9 +52,10 @@ impl Result {
     }
 }
 
-pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
+/// Draws the strip; returns whether there was a result to show.
+pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) -> bool {
     let Some(f) = s.finished.as_ref().filter(|_| !s.receiving()) else {
-        return;
+        return false;
     };
     let r = Result::of(f);
     let card: Option<&Card> = s.cards.iter().find(|c| match r.bunker {
@@ -150,6 +151,7 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
     response
         .interact(Sense::focusable_noninteractive())
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Status, true, spoken.clone()));
+    true
 }
 
 /// What a screen reader says for the result.
