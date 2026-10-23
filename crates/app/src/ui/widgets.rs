@@ -1,4 +1,6 @@
-use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{
+    Align2, Color32, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
+};
 
 use crate::theme::{self, AMBER, DIM, FAINT, STROKE, SURFACE, SURFACE_HI, TEXT, alpha};
 
@@ -47,6 +49,18 @@ pub struct Pill {
     pub label: String,
 }
 
+/// A 2 px ring around a widget that has keyboard focus.
+pub fn focus_ring(painter: &egui::Painter, response: &Response, radius: f32) {
+    if response.has_focus() {
+        painter.rect_stroke(
+            response.rect.expand(1.0),
+            radius + 1.0,
+            Stroke::new(2.0, TEXT),
+            StrokeKind::Outside,
+        );
+    }
+}
+
 /// Rounded status chip with a coloured dot; `pulse` (0..1) breathes a halo around the dot.
 pub fn pill(ui: &mut Ui, p: &Pill) -> Response {
     let galley = ui
@@ -67,6 +81,7 @@ pub fn pill(ui: &mut Ui, p: &Pill) -> Response {
         galley,
         TEXT,
     );
+    response.widget_info(|| WidgetInfo::labeled(Role::Status, true, p.label.clone()));
     response
 }
 
@@ -111,6 +126,8 @@ pub fn segmented(ui: &mut Ui, labels: [&str; 2], selected: usize) -> Option<usiz
             theme::text(13.0),
             if on { AMBER } else { DIM },
         );
+        focus_ring(ui.painter(), &resp, 12.0);
+        resp.widget_info(|| WidgetInfo::selected(Role::RadioButton, true, on, *l));
         if resp.clicked() && !on {
             clicked = Some(i);
         }
@@ -119,13 +136,15 @@ pub fn segmented(ui: &mut Ui, labels: [&str; 2], selected: usize) -> Option<usiz
     clicked
 }
 
+/// `toggle` is `Some(on)` for a button that switches something, `None` for a plain one.
 pub fn icon_button(
     ui: &mut Ui,
-    active: bool,
+    toggle: Option<bool>,
     tip: &str,
     paint: impl FnOnce(&egui::Painter, Rect, Color32),
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::click());
+    let active = toggle == Some(true);
     let hot = response.hovered();
     let fill = if active {
         alpha(AMBER, 0.18)
@@ -143,6 +162,11 @@ pub fn icon_button(
         DIM
     };
     paint(ui.painter(), rect.shrink(8.0), color);
+    focus_ring(ui.painter(), &response, 15.0);
+    response.widget_info(|| match toggle {
+        Some(on) => WidgetInfo::selected(Role::Button, true, on, tip),
+        None => WidgetInfo::labeled(Role::Button, true, tip),
+    });
     response.on_hover_text(tip)
 }
 
@@ -184,6 +208,8 @@ pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
     }
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, ink);
+    focus_ring(ui.painter(), &response, 9.0);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "wgpu", "persistence"] }
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "wgpu", "persistence", "accesskit"] }
 egui = "0.37"
 nasdara_decoder = { version = "0.1.0", path = "../decoder" }
 open = "5.4.5"

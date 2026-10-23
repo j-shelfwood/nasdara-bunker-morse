@@ -1,6 +1,8 @@
 //! One card per bunker heard, and a map of where they are.
 
-use egui::{Align, Align2, Layout, Pos2, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{
+    Align, Align2, Layout, Pos2, RichText, Role, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
+};
 use nasdara_decoder::bunkers::{MAP_SIZE, bunkers, is_izurvive_url};
 
 use super::UiState;
@@ -130,9 +132,46 @@ fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
             })
         })
         .response;
-    if response.interact(Sense::click()).clicked() {
+    let response = response.interact(Sense::click());
+    let spoken = card_spoken(c, selected);
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, spoken.clone()));
+    if response.clicked() {
         st.selected = if selected { None } else { Some(c.key.clone()) };
     }
+}
+
+/// What a screen reader says for a card.
+fn card_spoken(c: &Card, selected: bool) -> String {
+    let digits = |s: &str| {
+        s.chars()
+            .map(|ch| {
+                if ch == '?' {
+                    "unclear".to_string()
+                } else {
+                    ch.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let name = c
+        .bunker
+        .map_or("Unknown bunker".to_string(), |n| format!("Bunker {n}"));
+    let state = match reading(c) {
+        Reading::Confirmed => format!("read on {} transmissions", c.count),
+        Reading::Once => "heard once".to_string(),
+        Reading::Unclear => format!("{} digits unclear", c.unclear),
+    };
+    format!(
+        "{name}, grid {}, lock code {}, {state}. {} on the map",
+        spaced_grid(&c.grid).replace('?', "unclear"),
+        digits(&c.code),
+        if selected {
+            "Highlighted"
+        } else {
+            "Select to highlight"
+        }
+    )
 }
 
 fn spaced_grid(grid: &str) -> String {

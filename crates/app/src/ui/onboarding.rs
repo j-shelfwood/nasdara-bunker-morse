@@ -16,6 +16,23 @@ pub enum Outcome {
 pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -> Outcome {
     let screen = ctx.content_rect();
     let mut outcome = Outcome::Open;
+    let last = *page + 1 == PAGES;
+    // arrow keys turn the pages; consumed first so they do not also move the keyboard focus
+    let (left, right) = ctx.input_mut(|i| {
+        (
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+        )
+    });
+    if right && !last {
+        *page += 1;
+    }
+    if left && *page > 0 {
+        *page -= 1;
+    }
+    let shown_page = ctx.data(|d| d.get_temp::<usize>(ids.1));
+    let refocus = shown_page != Some(*page) || ctx.memory(|m| m.focused().is_none());
+    ctx.data_mut(|d| d.insert_temp(ids.1, *page));
 
     Area::new(ids.0)
         .order(Order::Foreground)
@@ -62,13 +79,16 @@ pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         if *page + 1 < PAGES {
-                                            if button(ui, "Next", ButtonKind::Primary).clicked() {
+                                            let next = button(ui, "Next", ButtonKind::Primary);
+                                            primary_focus(ui.ctx(), &next, refocus);
+                                            if next.clicked() {
                                                 *page += 1;
                                             }
                                         } else {
-                                            if button(ui, "Start listening", ButtonKind::Primary)
-                                                .clicked()
-                                            {
+                                            let start =
+                                                button(ui, "Start listening", ButtonKind::Primary);
+                                            primary_focus(ui.ctx(), &start, refocus);
+                                            if start.clicked() {
                                                 outcome = Outcome::Close;
                                             }
                                             if button(ui, "Try the demo", ButtonKind::Quiet)
@@ -93,6 +113,22 @@ pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -
         outcome = Outcome::Close;
     }
     outcome
+}
+
+/// The primary button holds the focus on each page, and keeps the left and right arrows for page turning.
+fn primary_focus(ctx: &egui::Context, response: &egui::Response, refocus: bool) {
+    if refocus {
+        response.request_focus();
+    }
+    ctx.memory_mut(|m| {
+        m.set_focus_lock_filter(
+            response.id,
+            egui::EventFilter {
+                horizontal_arrows: true,
+                ..Default::default()
+            },
+        )
+    });
 }
 
 fn dots(ui: &mut Ui, page: usize) {
@@ -303,4 +339,54 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
         ],
         Stroke::new(2.0, theme::RED),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui_kittest::Harness;
+
+    fn harness() -> Harness<'static, usize> {
+        let ids = (egui::Id::unique("backdrop"), egui::Id::unique("modal"));
+        Harness::builder()
+            .with_context_setup(theme::install)
+            .build_ui_state(
+                move |ui, page: &mut usize| {
+                    let _ = show(ui.ctx(), &ids, page);
+                },
+                0usize,
+            )
+    }
+
+    #[test]
+    fn arrow_keys_turn_pages_and_stop_at_the_ends() {
+        let mut h = harness();
+        h.run_steps(4);
+        h.key_press(egui::Key::ArrowLeft);
+        h.run_steps(4);
+        assert_eq!(*h.state(), 0, "left on the first page stays");
+        h.key_press(egui::Key::ArrowRight);
+        h.run_steps(4);
+        h.key_press(egui::Key::ArrowRight);
+        h.run_steps(4);
+        h.key_press(egui::Key::ArrowRight);
+        h.run_steps(4);
+        assert_eq!(*h.state(), PAGES - 1, "right stops on the last page");
+        h.key_press(egui::Key::ArrowLeft);
+        h.run_steps(4);
+        assert_eq!(*h.state(), PAGES - 2);
+    }
+
+    #[test]
+    fn enter_presses_the_focused_primary_button() {
+        let mut h = harness();
+        h.run_steps(4);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(4);
+        assert_eq!(
+            *h.state(),
+            1,
+            "Enter on the initially focused Next advances"
+        );
+    }
 }

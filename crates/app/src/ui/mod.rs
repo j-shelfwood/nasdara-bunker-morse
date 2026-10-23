@@ -201,7 +201,7 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let help = widgets::icon_button(ui, false, "How it works", |p, r, c| {
+            let help = widgets::icon_button(ui, None, "How it works", |p, r, c| {
                 p.circle_stroke(r.center(), r.width() / 2.0, Stroke::new(1.5, c));
                 p.text(
                     r.center(),
@@ -216,7 +216,7 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
             }
             let pin = widgets::icon_button(
                 ui,
-                st.settings.always_on_top,
+                Some(st.settings.always_on_top),
                 "Keep this window above the game",
                 |p, r, c| {
                     p.circle_filled(r.center() - Vec2::new(0.0, 2.0), 3.6, c);
@@ -232,7 +232,7 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
             if pin.clicked() {
                 st.settings.always_on_top = !st.settings.always_on_top;
             }
-            let gear = widgets::icon_button(ui, false, "Options", |p, r, c| {
+            let gear = widgets::icon_button(ui, None, "Options", |p, r, c| {
                 for k in 0..3 {
                     let y = r.top() + 2.0 + k as f32 * (r.height() - 4.0) / 2.0;
                     p.line_segment(

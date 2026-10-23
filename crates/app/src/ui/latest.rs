@@ -154,23 +154,13 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
 
 /// What a screen reader says for the result.
 pub fn spoken_text(r: &Result) -> String {
-    let digits = |s: &str| {
-        s.chars()
-            .map(|c| {
-                if c == '?' {
-                    "unclear".to_string()
-                } else {
-                    c.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
+    let said = |s: &str| s.replace('?', "unclear");
+    let code: Vec<String> = r.code.chars().map(|c| said(&c.to_string())).collect();
     let mut out = format!(
         "{}, grid {}, lock code {}",
         r.title(),
-        digits(&r.grid).chars().collect::<String>(),
-        digits(&r.code)
+        said(&r.grid_spaced()),
+        code.join(" ")
     );
     if r.unclear {
         out.push_str(", some digits unclear");
