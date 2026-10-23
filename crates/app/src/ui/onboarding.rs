@@ -10,7 +10,6 @@ const PAGES: usize = 3;
 pub enum Outcome {
     Open,
     Close,
-    Demo,
 }
 
 pub fn show(
@@ -95,11 +94,6 @@ pub fn show(
                                             primary_focus(ui.ctx(), &start, refocus);
                                             if start.clicked() {
                                                 outcome = Outcome::Close;
-                                            }
-                                            if button(ui, "Try the demo", ButtonKind::Quiet)
-                                                .clicked()
-                                            {
-                                                outcome = Outcome::Demo;
                                             }
                                         }
                                         if *page > 0

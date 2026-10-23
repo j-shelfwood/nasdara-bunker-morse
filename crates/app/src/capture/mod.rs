@@ -87,8 +87,6 @@ fn retry_after(source: Source) -> std::time::Duration {
 pub enum Event {
     Status(Status),
     Samples(Vec<i16>),
-    /// A demo clip ran to its end.
-    DemoFinished,
     /// Windows flagged `n` packets as discontinuous: audio went missing before them.
     Discontinuity(u32),
     /// The live capture ended (the game exited, the device failed); the stream stops here.
@@ -223,9 +221,7 @@ fn live(source: Source, sink: Sink, stop: Arc<AtomicBool>) {
 #[cfg(not(windows))]
 fn live(_source: Source, sink: Sink, stop: Arc<AtomicBool>) {
     sink.send(
-        Event::Status(Status::Failed(
-            "Live capture needs Windows. Use the demo.".into(),
-        )),
+        Event::Status(Status::Failed("Live capture needs Windows.".into())),
         &stop,
     );
 }

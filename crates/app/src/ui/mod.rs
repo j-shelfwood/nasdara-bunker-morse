@@ -121,7 +121,7 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
                 .fill(theme::BG)
                 .inner_margin(egui::Margin::symmetric(20, 8)),
         )
-        .show(ui, |ui| footer(ui, engine, st, &s));
+        .show(ui, |ui| footer(ui, &s));
     CentralPanel::default()
         .frame(
             egui::Frame::new()
@@ -154,10 +154,6 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
         match onboarding::show(&ctx, &st.modal_ids, &mut page, st.settings.reduce_motion) {
             onboarding::Outcome::Open => st.onboarding = Some(page),
             onboarding::Outcome::Close => finish_onboarding(st),
-            onboarding::Outcome::Demo => {
-                finish_onboarding(st);
-                engine.send(Command::StartDemo);
-            }
         }
     }
 }
@@ -455,7 +451,7 @@ fn bunkers_card(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
     });
 }
 
-fn footer(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
+fn footer(ui: &mut Ui, s: &Shared) {
     ui.horizontal(|ui| {
         // level meter
         let (rect, _) = ui.allocate_exact_size(Vec2::new(120.0, 8.0), Sense::hover());
@@ -483,15 +479,6 @@ fn footer(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
                     .font(theme::text(12.0))
                     .color(FAINT),
             );
-            ui.add_space(8.0);
-            if s.mode == Mode::Demo {
-                if button(ui, "Stop demo", ButtonKind::Quiet).clicked() {
-                    engine.send(Command::StopDemo);
-                }
-            } else if button(ui, "Run the demo", ButtonKind::Quiet).clicked() {
-                engine.send(Command::StartDemo);
-            }
         });
     });
-    let _ = st;
 }

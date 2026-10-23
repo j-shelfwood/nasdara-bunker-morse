@@ -14,6 +14,9 @@ struct Options {
     probe: Option<(u64, PathBuf, Source)>,
     /// `--gpu-check <report file>`: list the graphics adapters the window could use, for diagnosing a window that will not open.
     gpu_check: Option<PathBuf>,
+    /// `--demo`: play a synthetic transmission on repeat instead of listening. The default where live capture does not
+    /// exist, so the window can be tried and reviewed off Windows.
+    demo: bool,
 }
 
 fn options() -> Options {
@@ -22,12 +25,14 @@ fn options() -> Options {
         trace: false,
         probe: None,
         gpu_check: None,
+        demo: cfg!(not(windows)),
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--log" => o.log = args.next().map(PathBuf::from),
             "--trace" => o.trace = true,
+            "--demo" => o.demo = true,
             "--gpu-check" => o.gpu_check = args.next().map(PathBuf::from),
             "--probe" => {
                 let seconds = args.next().and_then(|v| v.parse().ok()).unwrap_or(10);
@@ -95,6 +100,9 @@ pub fn run() -> eframe::Result {
                 .unwrap_or_default();
             let log = opts.log.map(|p| DebugLog::new(p, opts.trace));
             let engine = engine::start(settings.source, cc.egui_ctx.clone(), log);
+            if opts.demo {
+                engine.send(engine::Command::StartDemo);
+            }
             Ok(Box::new(App {
                 engine,
                 st: UiState::new(settings),

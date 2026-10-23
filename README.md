@@ -9,7 +9,7 @@ by ear hard.
 
 ![The window while a message is arriving](docs/images/receiving.png)
 
-*The first screenshot is the built-in demo, which plays synthetic beeps. The second is a rendered test scene of a finished message. No game audio is used or included in this repository.*
+*The first screenshot is the demo, which plays synthetic beeps. The second is a rendered test scene of a finished message. No game audio is used or included in this repository.*
 
 Unofficial fan project, not affiliated with Bohemia Interactive.
 
@@ -81,12 +81,12 @@ Details, measurements and assumptions: [docs/how-it-works.md](docs/how-it-works.
 ## Building
 
 Needs a recent stable [Rust](https://rustup.rs). The decoder crate builds and tests anywhere; the app is Windows-first
-(live capture needs Windows). The app has only been run on Windows and on macOS (where it runs the demo); CI compiles
+(live capture needs Windows). The app has only been run on Windows and on macOS (where it plays the demo on repeat, since there is nothing to listen to); CI compiles
 it on Windows only, so Linux is untested.
 
 ```
 cargo test --workspace
-cargo run --release                      # the app
+cargo run --release                      # the app (off Windows it plays the demo; `-- --demo` does that anywhere)
 cargo run --release -- --log decode.log  # with the decoder log
 cargo build --release                    # target/release/nasdara-bunker-morse.exe on Windows
 ```

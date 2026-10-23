@@ -98,7 +98,6 @@ pub struct Shared {
     pub silent_for: f64,
     /// Cards that appeared or changed since the window last looked.
     pub changed: Vec<String>,
-    pub demo_done: bool,
     /// `false` once the engine thread has ended for any reason, a panic included; nothing updates after that.
     pub engine_alive: bool,
 }
@@ -122,7 +121,6 @@ impl Shared {
             level: 0.0,
             silent_for: 0.0,
             changed: Vec::new(),
-            demo_done: false,
             engine_alive: true,
         }
     }
@@ -146,7 +144,6 @@ impl Shared {
 pub enum Command {
     SetSource(Source),
     StartDemo,
-    StopDemo,
     ClearCards,
 }
 
@@ -276,7 +273,6 @@ impl Engine {
             s.preview = None;
             s.clock = 0.0;
             s.clock_at = Instant::now();
-            s.demo_done = false;
             s.status = if mode == Mode::Demo {
                 Status::Listening
             } else {
@@ -358,10 +354,6 @@ impl Engine {
                 self.mode = Mode::Demo;
                 self.restart(tx);
             }
-            Command::StopDemo => {
-                self.mode = Mode::Live;
-                self.restart(tx);
-            }
             Command::ClearCards => {
                 self.ledger = BunkerLedger::new();
                 let mut s = self.lock();
@@ -401,12 +393,6 @@ impl Engine {
                 }
             }
             Event::SessionEnded => self.session_ended(),
-            Event::DemoFinished => {
-                // the demo clip ends in silence, so a final burst may still be open
-                let bursts = self.pipeline.flush();
-                self.bursts(bursts);
-                self.lock().demo_done = true;
-            }
         }
     }
 
@@ -636,8 +622,6 @@ mod tests {
         assert_eq!(e.lock().status, Status::WaitingForGame);
         e.event(msg(2, Event::Samples(synth::demo_transmission(7))));
         assert!(e.lock().frames.is_empty());
-        e.event(msg(2, Event::DemoFinished));
-        assert!(!e.lock().demo_done);
     }
 
     #[test]
@@ -647,8 +631,6 @@ mod tests {
         assert_eq!(e.lock().status, Status::Listening);
         e.event(msg(3, Event::Samples(vec![0; 4410])));
         assert!(!e.lock().frames.is_empty());
-        e.event(msg(3, Event::DemoFinished));
-        assert!(e.lock().demo_done);
     }
 
     #[test]
@@ -657,7 +639,7 @@ mod tests {
         let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
         e.restart(&tx);
         let old = e.generation;
-        e.command(Command::StopDemo, &tx);
+        e.command(Command::SetSource(Source::Game), &tx);
         assert_eq!(e.generation, old + 1);
         e.event(msg(old, Event::Status(Status::Listening)));
         assert_ne!(e.lock().status, Status::Listening);
