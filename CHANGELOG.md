@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 (2026-10-23)
+
+A new window layout and a round of finer details.
+
+- The map is the centrepiece: the result strip and the bunkers list sit in a column beside it, and the Morse ribbon, tone trace and the ten digit slots in a bar along the bottom (about a fifth of the window height). Narrow windows keep the list in a drawer and drop the trace.
+- Hover a bunker on the map for a card with its lock code, map grid, game coordinates and how often it was heard. Bunkers never heard say so. Pins can be focused with the keyboard and are labelled for screen readers.
+- Chamfered HUD frames with corner brackets on the cards, the result strip and the map.
+- Digits and labels are centred on the glyph in every box (the fonts' metrics are corrected), and the interface eases in and out instead of switching. The reduce-motion setting still turns all of it off.
+- Morse cheat sheet: the ten digits as dots and dashes, a tap plays a pattern, and while a message arrives the digits that fit what was heard so far light up. It can be hidden in the menu.
+- Test mode (options menu, or `--demo`) plays synthetic beeps on repeat, so the window can be tried without the game. It is the default off Windows.
+- The minimap outlines the island.
+- The options in the menu are switches.
+- The idle window repaints at 30 frames a second while listening, so the signal strip no longer stutters when a message starts.
+
 ## 0.1.0 (2026-10-23)
 
 First release.
@@ -9,8 +23,6 @@ First release.
 - Lock codes are voted digit by digit over every repeat of a bunker's message.
 - Opens the bunker's position on iZurvive.
 - Falls back to listening to all system audio for PCs where Windows does not hand DayZ's sound to the app.
-- Morse cheat sheet under the bunkers: the ten digits as dots and dashes, a tap plays a pattern, and while a message arrives the digits that fit what was heard so far light up. It can be hidden in the menu.
-- Test mode (options menu, or `--demo`) plays synthetic beeps on repeat, so the window can be tried without the game. It is the default off Windows.
 - Pin button keeps the window above the game (borderless windowed mode).
 - Flashes the taskbar button when a bunker has been read (option, on by default).
 - Runs at below-normal process priority so the game keeps the CPU.

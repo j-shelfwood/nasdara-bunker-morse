@@ -9,7 +9,7 @@ by ear hard.
 
 ![The window while a message is arriving](docs/images/receiving.png)
 
-*The first screenshot is the demo, which plays synthetic beeps. The second is a rendered test scene of a finished message. No game audio is used or included in this repository.*
+*The first screenshot is test mode, which plays synthetic beeps. The second is a rendered test scene of a finished message with the hover card of one bunker open. No game audio is used or included in this repository.*
 
 Unofficial fan project, not affiliated with Bohemia Interactive.
 
