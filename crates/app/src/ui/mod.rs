@@ -87,8 +87,11 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     let mut s = engine.lock();
 
     // animation drives its own repaints; idle windows repaint a few times a second so clocks and ages stay current
+    // a listening window scrolls the signal strip, so it needs a steady rate before a transmission is recognised
     if s.receiving() {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    } else if s.status == Status::Listening && !st.settings.reduce_motion {
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
     } else {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
