@@ -39,6 +39,8 @@ pub enum Event {
     Samples(Vec<i16>),
     /// A demo clip ran to its end.
     DemoFinished,
+    /// Windows flagged `n` packets as discontinuous: audio went missing before them.
+    Discontinuity(u32),
     /// The live capture ended (the game exited, the device failed); the stream stops here.
     SessionEnded,
 }

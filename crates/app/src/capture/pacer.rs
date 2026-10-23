@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::SAMPLE_RATE;
 
@@ -36,6 +36,13 @@ impl Pacer {
         }
     }
 
+    /// Time until the next whole chunk is due (zero when one already is).
+    pub fn until_next(&self, now: Instant) -> Duration {
+        let needed = (self.emitted + CHUNK as u64) as f64 + LATENCY as f64;
+        let at = self.started + Duration::from_secs_f64(needed / SAMPLE_RATE as f64);
+        at.saturating_duration_since(now)
+    }
+
     /// Whole chunks due at `now`.
     pub fn due(&mut self, now: Instant) -> Vec<i16> {
         let elapsed = now.saturating_duration_since(self.started).as_secs_f64();
@@ -54,7 +61,6 @@ impl Pacer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn silence_is_filled_on_the_wall_clock() {
@@ -81,5 +87,25 @@ mod tests {
         let mut p = Pacer::new(Instant::now());
         p.push(std::iter::repeat_n(1, SAMPLE_RATE * 5));
         assert_eq!(p.pending.len(), SAMPLE_RATE);
+    }
+
+    #[test]
+    fn until_next_counts_down_to_the_next_chunk() {
+        let t0 = Instant::now();
+        let mut p = Pacer::new(t0);
+        // first chunk is due once 10 ms of audio plus the 20 ms jitter buffer have elapsed
+        let first = p.until_next(t0);
+        assert!(
+            first > Duration::from_millis(29) && first <= Duration::from_millis(31),
+            "{first:?}"
+        );
+        assert!(p.until_next(t0 + Duration::from_millis(40)).is_zero());
+        assert_eq!(p.due(t0 + Duration::from_millis(31)).len(), CHUNK);
+        // right after emitting, the next one is one chunk (10 ms) away
+        let next = p.until_next(t0 + Duration::from_millis(31));
+        assert!(
+            next > Duration::from_millis(8) && next <= Duration::from_millis(10),
+            "{next:?}"
+        );
     }
 }

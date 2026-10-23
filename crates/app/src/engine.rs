@@ -189,6 +189,8 @@ struct Engine {
     capture: Option<Capture>,
     /// The note about dropped audio is added once per session.
     drops_noted: bool,
+    /// Packets Windows flagged as discontinuous this session, and whether the note was added.
+    gaps: u64,
     /// Session counter: bumped on every restart; events of an older generation belong to a replaced capture.
     generation: u64,
     source: Source,
@@ -215,6 +217,7 @@ impl Engine {
             ledger: BunkerLedger::new(),
             capture: None,
             drops_noted: false,
+            gaps: 0,
             generation: 0,
             source,
             mode: Mode::Live,
@@ -246,7 +249,6 @@ impl Engine {
     fn restart(&mut self, tx: &SyncSender<Message>) {
         self.capture = None;
         self.generation += 1;
-        self.drops_noted = false;
         self.reset_stream();
         let (mode, speed) = (
             self.mode,
@@ -303,6 +305,8 @@ impl Engine {
     /// A fresh decoder and beep tracker for a new stream.
     fn reset_stream(&mut self) {
         self.pipeline = Pipeline::new();
+        self.drops_noted = false;
+        self.gaps = 0;
         self.tone_on = false;
         self.open = None;
         self.last_beep_end = f64::NEG_INFINITY;
@@ -377,6 +381,18 @@ impl Engine {
                 self.ctx.request_repaint();
             }
             Event::Samples(pcm) => self.samples(&pcm),
+            Event::Discontinuity(n) => {
+                self.gaps += u64::from(n);
+                if self.gaps == u64::from(n) {
+                    let mut s = self.lock();
+                    s.notes.push(Note::Warn(
+                        "Windows reported missing audio; a digit may be misread".into(),
+                    ));
+                    trim_notes(&mut s.notes);
+                    drop(s);
+                    self.ctx.request_repaint();
+                }
+            }
             Event::SessionEnded => self.session_ended(),
             Event::DemoFinished => {
                 // the demo clip ends in silence, so a final burst may still be open
@@ -747,6 +763,18 @@ mod tests {
         let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
         e.restart(&tx);
         e.note_drops(1);
+        assert_eq!(e.lock().notes.len(), 2);
+    }
+
+    #[test]
+    fn discontinuities_are_counted_and_noted_once_per_session() {
+        let mut e = engine(1);
+        e.event(msg(1, Event::Discontinuity(2)));
+        e.event(msg(1, Event::Discontinuity(1)));
+        assert_eq!(e.gaps, 3);
+        assert_eq!(e.lock().notes.len(), 1);
+        e.event(msg(1, Event::SessionEnded));
+        e.event(msg(1, Event::Discontinuity(1)));
         assert_eq!(e.lock().notes.len(), 2);
     }
 }

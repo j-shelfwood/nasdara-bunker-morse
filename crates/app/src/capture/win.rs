@@ -6,7 +6,9 @@ use wasapi::{
     AudioCaptureClient, AudioClient, DeviceEnumerator, Direction, Handle, SampleType, StreamMode,
     WaveFormat, initialize_mta,
 };
-use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, HANDLE, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ACCESS_DENIED, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -126,8 +128,14 @@ impl Session {
             if stop.load(Ordering::Relaxed) {
                 break Ended::ProcessGone;
             }
-            if let Err(e) = self.drain(&mut pacer) {
-                break Ended::DeviceError(format!("Audio capture stopped: {e}"));
+            match self.drain(&mut pacer) {
+                Ok(0) => {}
+                Ok(gaps) => {
+                    if !tx.send(Event::Discontinuity(gaps)) {
+                        break Ended::ProcessGone;
+                    }
+                }
+                Err(e) => break Ended::DeviceError(format!("Audio capture stopped: {e}")),
             }
             let now = Instant::now();
             if let Some(process) = process
@@ -150,14 +158,27 @@ impl Session {
             if !due.is_empty() && !tx.send_samples(due) {
                 break Ended::ProcessGone;
             }
-            // wakes on new audio; times out when nothing plays, which is when the pacer supplies the silence
-            let _ = self.event.wait_for_event(10);
+            // wakes on new audio, or when the next chunk is due, which is how the pacer supplies silence
+            if !self.wait(pacer.until_next(Instant::now())) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
         };
         let _ = self.client.stop_stream();
         ended
     }
 
-    fn drain(&mut self, pacer: &mut Pacer) -> Result<(), String> {
+    /// Waits for new audio for at most `limit` (and at most 10 ms). `false` when the wait itself failed, which is
+    /// different from timing out: the caller must not spin on it.
+    fn wait(&self, limit: Duration) -> bool {
+        let ms = limit.as_micros().div_ceil(1000).clamp(1, 10) as u32;
+        // SAFETY: the event handle is owned by `self.event`, which outlives the call.
+        let r = unsafe { WaitForSingleObject(self.event.as_handle(), ms) };
+        r == WAIT_OBJECT_0 || r == WAIT_TIMEOUT
+    }
+
+    /// Moves every waiting packet into the pacer; returns how many were flagged as discontinuous.
+    fn drain(&mut self, pacer: &mut Pacer) -> Result<u32, String> {
+        let mut gaps = 0;
         loop {
             let frames = self
                 .capture
@@ -165,7 +186,7 @@ impl Session {
                 .map_err(|e| e.to_string())?
                 .unwrap_or(0) as usize;
             if frames == 0 {
-                return Ok(());
+                return Ok(gaps);
             }
             if self.scratch.len() < frames * 4 {
                 self.scratch.resize(frames * 4, 0);
@@ -175,6 +196,7 @@ impl Session {
                 .read_from_device(&mut self.scratch)
                 .map_err(|e| e.to_string())?;
             let got = got as usize;
+            gaps += u32::from(info.flags.data_discontinuity);
             if info.flags.silent {
                 pacer.push(std::iter::repeat_n(0, got));
                 continue;
