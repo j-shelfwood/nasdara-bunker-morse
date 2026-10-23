@@ -21,20 +21,25 @@ use super::{Event, SAMPLE_RATE, Sink, Source, Status, failure_message, retry_aft
 
 const GAME_EXE: &str = "DayZ_x64.exe";
 const PROBE_EVERY: Duration = Duration::from_secs(2);
+/// A discontinuity note is not worth stalling the drain for.
+const DISCONTINUITY_PATIENCE: Duration = Duration::from_millis(20);
 const ALIVE_EVERY: Duration = Duration::from_millis(500);
 
 pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
     if initialize_mta().is_err() {
-        tx.send(Event::Status(Status::Failed(
-            "Windows audio could not be initialised".into(),
-        )));
+        tx.send(
+            Event::Status(Status::Failed(
+                "Windows audio could not be initialised".into(),
+            )),
+            &stop,
+        );
         return;
     }
     let mut last: Option<Status> = None;
     let mut say = |s: Status| {
         if last.as_ref() != Some(&s) {
             last = Some(s.clone());
-            tx.send(Event::Status(s));
+            tx.send(Event::Status(s), &stop);
         }
     };
     while !stop.load(Ordering::Relaxed) {
@@ -56,7 +61,7 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
-                tx.send(Event::SessionEnded);
+                tx.send(Event::SessionEnded, &stop);
                 match ended {
                     Ended::ProcessGone => say(Status::WaitingForGame),
                     Ended::DeviceError(e) => say(Status::Failed(e)),
@@ -135,7 +140,7 @@ impl Session {
             match self.drain(&mut pacer) {
                 Ok(0) => {}
                 Ok(gaps) => {
-                    if !tx.send(Event::Discontinuity(gaps)) {
+                    if !tx.send_within(Event::Discontinuity(gaps), stop, DISCONTINUITY_PATIENCE) {
                         break Ended::ProcessGone;
                     }
                 }

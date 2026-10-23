@@ -10,6 +10,7 @@ mod win;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -136,14 +137,34 @@ impl Sink {
         }
     }
 
-    /// Waits for room: for status changes and for the demo, which must not lose samples. `false` when the engine is gone.
-    pub fn send(&self, event: Event) -> bool {
-        self.tx
-            .send(Message {
-                generation: self.generation,
-                event,
-            })
-            .is_ok()
+    /// Delivers `event`, retrying until there is room. Gives up when `stop` is set (the engine has moved on to a newer
+    /// capture then) and returns `false` only when the engine is gone. For events that must arrive: status changes,
+    /// `SessionEnded`, and the demo, which must not lose samples.
+    pub fn send(&self, event: Event, stop: &AtomicBool) -> bool {
+        self.retry(event, stop, None)
+    }
+
+    /// Like `send`, but gives up after `budget` so a slow engine cannot stall a loop that must keep draining.
+    pub fn send_within(&self, event: Event, stop: &AtomicBool, budget: Duration) -> bool {
+        self.retry(event, stop, Some(Instant::now() + budget))
+    }
+
+    fn retry(&self, event: Event, stop: &AtomicBool, until: Option<Instant>) -> bool {
+        let mut message = Message {
+            generation: self.generation,
+            event,
+        };
+        loop {
+            match self.tx.try_send(message) {
+                Ok(()) => return true,
+                Err(TrySendError::Disconnected(_)) => return false,
+                Err(TrySendError::Full(m)) => message = m,
+            }
+            if stop.load(Ordering::Relaxed) || until.is_some_and(|u| Instant::now() >= u) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 }
 
@@ -200,10 +221,13 @@ fn live(source: Source, sink: Sink, stop: Arc<AtomicBool>) {
 }
 
 #[cfg(not(windows))]
-fn live(_source: Source, sink: Sink, _stop: Arc<AtomicBool>) {
-    sink.send(Event::Status(Status::Failed(
-        "Live capture needs Windows. Use the demo.".into(),
-    )));
+fn live(_source: Source, sink: Sink, stop: Arc<AtomicBool>) {
+    sink.send(
+        Event::Status(Status::Failed(
+            "Live capture needs Windows. Use the demo.".into(),
+        )),
+        &stop,
+    );
 }
 
 #[cfg(test)]
@@ -257,6 +281,54 @@ mod tests {
             "No audio device: gone"
         );
         assert!(retry_after(Source::System) < retry_after(Source::Game));
+    }
+
+    fn full_sink() -> (Sink, mpsc::Receiver<Message>) {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let sink = Sink::new(0, tx);
+        assert!(sink.send_samples(vec![0; 10]));
+        (sink, rx)
+    }
+
+    #[test]
+    fn send_within_gives_up_on_a_full_channel_after_its_budget() {
+        let (sink, _rx) = full_sink();
+        let stop = AtomicBool::new(false);
+        let t = Instant::now();
+        assert!(sink.send_within(Event::Discontinuity(1), &stop, Duration::from_millis(50)));
+        let took = t.elapsed();
+        assert!(
+            took >= Duration::from_millis(50) && took < Duration::from_secs(2),
+            "{took:?}"
+        );
+    }
+
+    #[test]
+    fn send_stops_waiting_when_stopped() {
+        let (sink, _rx) = full_sink();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            flag.store(true, Ordering::Relaxed);
+        });
+        let t = Instant::now();
+        sink.send(Event::SessionEnded, &stop);
+        assert!(t.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn send_delivers_once_the_engine_catches_up() {
+        let (sink, rx) = full_sink();
+        let stop = AtomicBool::new(false);
+        let drain = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let first = rx.recv().unwrap();
+            assert!(matches!(first.event, Event::Samples(_)));
+            rx.recv_timeout(Duration::from_secs(5)).unwrap()
+        });
+        assert!(sink.send(Event::SessionEnded, &stop));
+        assert!(matches!(drain.join().unwrap().event, Event::SessionEnded));
     }
 
     #[test]

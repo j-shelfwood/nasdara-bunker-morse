@@ -6,7 +6,7 @@ use super::{Event, SAMPLE_RATE, Sink, Status};
 
 /// Feeds a clip into the engine in 10 ms steps, `speed` times faster than real time.
 pub fn play(pcm: Vec<i16>, speed: f64, sink: Sink, stop: Arc<AtomicBool>) {
-    sink.send(Event::Status(Status::Listening));
+    sink.send(Event::Status(Status::Listening), &stop);
     let step = (SAMPLE_RATE as f64 / 100.0 * speed) as usize;
     let started = Instant::now();
     let mut at = 0;
@@ -14,7 +14,9 @@ pub fn play(pcm: Vec<i16>, speed: f64, sink: Sink, stop: Arc<AtomicBool>) {
         let due = (started.elapsed().as_secs_f64() * 100.0) as usize * step;
         while at < due.min(pcm.len()) {
             let end = (at + step).min(pcm.len());
-            if !sink.send(Event::Samples(pcm[at..end].to_vec())) {
+            if stop.load(Ordering::Relaxed)
+                || !sink.send(Event::Samples(pcm[at..end].to_vec()), &stop)
+            {
                 return;
             }
             at = end;
@@ -22,6 +24,6 @@ pub fn play(pcm: Vec<i16>, speed: f64, sink: Sink, stop: Arc<AtomicBool>) {
         std::thread::sleep(Duration::from_millis(5));
     }
     if !stop.load(Ordering::Relaxed) {
-        sink.send(Event::DemoFinished);
+        sink.send(Event::DemoFinished, &stop);
     }
 }
