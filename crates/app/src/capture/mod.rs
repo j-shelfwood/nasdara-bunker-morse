@@ -34,6 +34,34 @@ pub enum Status {
     Failed(String),
 }
 
+/// Allows one attempt at a time. A Windows call that never returns would otherwise leak one blocked helper thread
+/// per retry; while it is pending, new attempts are refused.
+#[cfg(any(windows, test))]
+#[derive(Default)]
+pub struct InFlight(AtomicBool);
+
+#[cfg(any(windows, test))]
+impl InFlight {
+    pub const fn new() -> InFlight {
+        InFlight(AtomicBool::new(false))
+    }
+
+    /// `None` while a previous attempt has not finished; the guard clears the flag when dropped.
+    pub fn begin(&'static self) -> Option<InFlightGuard> {
+        (!self.0.swap(true, Ordering::AcqRel)).then_some(InFlightGuard(self))
+    }
+}
+
+#[cfg(any(windows, test))]
+pub struct InFlightGuard(&'static InFlight);
+
+#[cfg(any(windows, test))]
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.0.store(false, Ordering::Release);
+    }
+}
+
 /// The status text for a capture that could not start. Capturing one process needs Windows build 20348 or later,
 /// so the game source points at the system source, which works everywhere.
 #[cfg(any(windows, test))]
@@ -229,5 +257,20 @@ mod tests {
             "No audio device: gone"
         );
         assert!(retry_after(Source::System) < retry_after(Source::Game));
+    }
+
+    #[test]
+    fn only_one_activation_is_in_flight() {
+        static FLAG: InFlight = InFlight::new();
+        let first = FLAG.begin().expect("first attempt");
+        assert!(
+            FLAG.begin().is_none(),
+            "second attempt while the first hangs"
+        );
+        drop(first);
+        assert!(
+            FLAG.begin().is_some(),
+            "free again once the helper finished"
+        );
     }
 }

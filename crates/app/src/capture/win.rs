@@ -15,6 +15,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
 use windows::core::HRESULT;
 
+use super::InFlight;
 use super::pacer::Pacer;
 use super::{Event, SAMPLE_RATE, Sink, Source, Status, failure_message, retry_after};
 
@@ -233,10 +234,15 @@ unsafe impl Send for Activated {}
 /// `AudioClient::new_application_loopback_client` waits on a condition variable without a timeout, so it runs on a
 /// helper thread. A call that never returns leaks that thread and nothing else; its late result is dropped.
 fn activate_loopback(pid: u32, stop: &AtomicBool) -> Result<AudioClient, String> {
+    static ACTIVATING: InFlight = InFlight::new();
+    let Some(in_flight) = ACTIVATING.begin() else {
+        return Err("an earlier request to Windows has not returned".into());
+    };
     let (done, result) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new()
         .name("activate".into())
         .spawn(move || {
+            let _in_flight = in_flight;
             let client = if initialize_mta().is_err() {
                 Err("Windows audio could not be initialised".to_string())
             } else {
