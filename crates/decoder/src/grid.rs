@@ -29,9 +29,14 @@ pub const SHIPPED_TIMING: Timing = Timing {
 };
 
 pub const DIGITS_PER_RECORD: usize = 10;
-/// Each digit may start this far (seconds) from where the previous one predicts: clock jitter between server and client.
-const JITTER_S: f64 = 0.12;
+/// A digit may start this far (seconds) from where the previous one predicts. Clock jitter between server and client
+/// stays within `NEAR_S`; live broadcasts also showed a digit gap cut short by 0.4 s (2026-10-23, `2` then `3`, two
+/// complete 5-symbol digits 1.89 s apart where 2.3 s is nominal), so the window reaches that far, at a steeper price.
+const JITTER_S: f64 = 0.45;
+const NEAR_S: f64 = 0.12;
 const JITTER_PENALTY: f64 = 0.5;
+/// Extra cost per frame beyond `NEAR_S`: a shifted digit must be backed by real tone, not just fit a lucky noise burst.
+const FAR_PENALTY: f64 = 3.0;
 /// Tone level (dB over the reference bins) at which a frame counts as evidence for a beep; ~25 dB is a beep, ~-3 dB is not.
 const EVIDENCE_DB: f64 = 11.0;
 const EVIDENCE_SCALE: f64 = 0.3;
@@ -44,6 +49,11 @@ struct Pattern {
     on: Vec<(usize, usize)>,
     len: usize,
     tail: usize,
+}
+
+/// Score lost for starting a digit `shift` frames away from where the previous one ends.
+fn jitter_cost(shift: usize, near: usize) -> f64 {
+    JITTER_PENALTY * shift as f64 + FAR_PENALTY * shift.saturating_sub(near) as f64
 }
 
 fn to_frames(s: f64) -> usize {
@@ -160,6 +170,7 @@ impl Dp {
         let frames = self.frames();
         let stride = self.stride;
         let jitter = to_frames(JITTER_S);
+        let near = to_frames(NEAR_S);
         let np = self.patterns.len();
         // Pattern scores per start frame do not depend on the digit index.
         let mut pat_score = vec![0.0; frames * np];
@@ -187,7 +198,7 @@ impl Dp {
                     } else if j == 0 {
                         b
                     } else {
-                        b - JITTER_PENALTY * f.abs_diff(start) as f64
+                        b - jitter_cost(f.abs_diff(start), near)
                     };
                     if v > base {
                         base = v;

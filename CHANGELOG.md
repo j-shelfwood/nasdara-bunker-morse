@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fewer unclear digits in game: the decoder now accepts a digit that follows its predecessor up to 0.4 s earlier than the nominal gap, which the live broadcast does now and then. Records that showed four or five `?` read in full.
+
 ## 0.2.0 (2026-10-23)
 
 A new window layout and a round of finer details.
