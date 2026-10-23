@@ -1,7 +1,7 @@
-mod cards;
+mod bunkers;
 mod guide;
-mod island;
 mod latest;
+mod map;
 mod onboarding;
 mod signal;
 mod slots;
@@ -483,9 +483,10 @@ fn bunkers_card(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
             ui.vertical(|ui| {
                 ui.set_width(list_w);
                 ui.set_max_width(list_w);
-                cards::show(ui, st, s);
+                bunkers::show(ui, st, s);
             });
-            cards::map(ui, st, s, map_side);
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(map_side), Sense::hover());
+            map::show(ui, st, s, rect);
         });
     });
 }
