@@ -6,7 +6,7 @@ mod reading;
 
 pub use reading::{Reading, reading, reading_color};
 
-use egui::{Align2, Sense, Stroke, Ui, Vec2};
+use egui::{Pos2, Sense, Stroke, Ui, Vec2};
 
 use super::UiState;
 use crate::engine::{Card, Shared};
@@ -49,18 +49,29 @@ fn empty(ui: &mut Ui) {
         5.0,
         5.0,
     ));
-    p.text(
-        rect.center() - Vec2::new(0.0, 12.0),
-        Align2::CENTER_CENTER,
-        "No bunker heard yet",
-        theme::bold(15.0),
+    // two centred blocks, the second wrapped to the box, stacked about the box's own middle
+    let wrap = rect.width() - 32.0;
+    let title = p.layout("No bunker heard yet".into(), theme::bold(15.0), DIM, wrap);
+    let body = p.layout(
+        "Each bunker that transmits gets a card with its map grid, lock code and a map link."
+            .into(),
+        theme::text(13.0),
+        FAINT,
+        wrap,
+    );
+    let gap = 8.0;
+    let top = rect.center().y - (title.size().y + gap + body.size().y) / 2.0;
+    p.galley(
+        Pos2::new(rect.center().x - title.size().x / 2.0, top),
+        title.clone(),
         DIM,
     );
-    p.text(
-        rect.center() + Vec2::new(0.0, 12.0),
-        Align2::CENTER_CENTER,
-        "Each bunker that transmits gets a card with its map grid, lock code and a map link.",
-        theme::text(13.0),
+    p.galley(
+        Pos2::new(
+            rect.center().x - body.size().x / 2.0,
+            top + title.size().y + gap,
+        ),
+        body,
         FAINT,
     );
 }
