@@ -115,7 +115,10 @@ mod tests {
             ..Default::default()
         });
         f(ctx);
-        ctx.end_pass()
+        let mut out = ctx.end_pass();
+        // a dropped output with unapplied texture deltas panics in debug builds
+        out.textures_delta.clear();
+        out
     }
 
     fn id() -> Id {

@@ -109,7 +109,8 @@ mod tests {
                 rect = r.response.rect;
             });
         });
-        let _ = ctx.end_pass();
+        // a dropped output with unapplied texture deltas panics in debug builds
+        ctx.end_pass().textures_delta.clear();
         assert_eq!(rect.height(), 40.0 + 24.0);
         assert!((rect.width() - 300.0).abs() < 0.5, "{}", rect.width());
     }

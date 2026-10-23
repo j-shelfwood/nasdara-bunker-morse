@@ -53,7 +53,8 @@ mod tests {
             ..Default::default()
         });
         f(ctx);
-        let _ = ctx.end_pass();
+        // a dropped output with unapplied texture deltas panics in debug builds
+        ctx.end_pass().textures_delta.clear();
     }
 
     #[test]
