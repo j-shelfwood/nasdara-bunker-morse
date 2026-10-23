@@ -6,13 +6,12 @@ use wasapi::{
     AudioCaptureClient, AudioClient, DeviceEnumerator, Direction, Handle, SampleType, StreamMode,
     WaveFormat, initialize_mta,
 };
-use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, HANDLE, WAIT_TIMEOUT};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+use windows::core::HRESULT;
 
 use super::pacer::Pacer;
 use super::{Event, SAMPLE_RATE, Sink, Source, Status};
@@ -38,7 +37,7 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::Relaxed) {
         let target = match source {
             Source::Game => match find_process(GAME_EXE) {
-                Some(pid) => Some(pid),
+                Some(process) => Some(process),
                 None => {
                     say(Status::WaitingForGame);
                     sleep_unless_stopped(&stop, PROBE_EVERY);
@@ -47,10 +46,10 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
             },
             Source::System => None,
         };
-        match Session::open(target, &stop) {
+        match Session::open(target.as_ref().map(|p| p.pid), &stop) {
             Ok(mut session) => {
                 say(Status::Listening);
-                let ended = session.pump(&tx, &stop, target);
+                let ended = session.pump(&tx, &stop, target.as_ref());
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
@@ -108,7 +107,7 @@ impl Session {
         })
     }
 
-    fn pump(&mut self, tx: &Sink, stop: &AtomicBool, pid: Option<u32>) -> Ended {
+    fn pump(&mut self, tx: &Sink, stop: &AtomicBool, process: Option<&Process>) -> Ended {
         let mut pacer = Pacer::new(Instant::now());
         let mut next_alive = Instant::now() + ALIVE_EVERY;
         let ended = loop {
@@ -119,11 +118,11 @@ impl Session {
                 break Ended::DeviceError(format!("Audio capture stopped: {e}"));
             }
             let now = Instant::now();
-            if let Some(pid) = pid
+            if let Some(process) = process
                 && now >= next_alive
             {
                 next_alive = now + ALIVE_EVERY;
-                if !is_alive(pid) {
+                if !process.alive() {
                     break Ended::ProcessGone;
                 }
             }
@@ -216,7 +215,51 @@ fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) {
     }
 }
 
-fn find_process(exe: &str) -> Option<u32> {
+/// The game process, found by name. The handle stays open for the session: waiting on it tells when the process
+/// ended, and a held handle keeps Windows from giving its id to another process.
+struct Process {
+    pid: u32,
+    /// `None` when Windows refuses to open the process (it runs elevated): then only the capture itself can tell
+    /// that it ended.
+    handle: Option<HANDLE>,
+}
+
+impl Process {
+    fn alive(&self) -> bool {
+        let Some(handle) = self.handle else {
+            return true;
+        };
+        // SAFETY: the handle is owned by this value and open until it is dropped.
+        unsafe { WaitForSingleObject(handle, 0) == WAIT_TIMEOUT }
+    }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle {
+            // SAFETY: the handle came from OpenProcess and is closed only here.
+            let _ = unsafe { CloseHandle(handle) };
+        }
+    }
+}
+
+fn find_process(exe: &str) -> Option<Process> {
+    let pid = find_pid(exe)?;
+    // SAFETY: plain call; the returned handle is owned by the `Process`.
+    match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(handle) => Some(Process {
+            pid,
+            handle: Some(handle),
+        }),
+        Err(e) if e.code() == HRESULT::from_win32(ERROR_ACCESS_DENIED.0) => {
+            Some(Process { pid, handle: None })
+        }
+        // gone between the snapshot and now
+        Err(_) => None,
+    }
+}
+
+fn find_pid(exe: &str) -> Option<u32> {
     // SAFETY: the snapshot handle is closed on every path; the entry struct is initialised with its size as the API requires.
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
@@ -240,18 +283,5 @@ fn find_process(exe: &str) -> Option<u32> {
         }
         let _ = CloseHandle(snapshot);
         found
-    }
-}
-
-fn is_alive(pid: u32) -> bool {
-    // SAFETY: the process handle is closed before returning.
-    unsafe {
-        let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-            return false;
-        };
-        let mut code = 0u32;
-        let alive = GetExitCodeProcess(handle, &mut code).is_ok() && code == STILL_ACTIVE.0 as u32;
-        let _ = CloseHandle(handle);
-        alive
     }
 }
