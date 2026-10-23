@@ -12,7 +12,7 @@ use nasdara_decoder::pipeline::{Pipeline, Preview};
 use nasdara_decoder::synth;
 
 use crate::capture::{Capture, Event, Message, Source, Status};
-use crate::log::DebugLog;
+use crate::log::{DebugLog, LogLine};
 
 /// How much history the window can draw.
 pub const HISTORY_S: f64 = 60.0;
@@ -366,12 +366,14 @@ impl Engine {
         s.level = self.peak;
         s.silent_for = self.silent_samples as f64 / crate::capture::SAMPLE_RATE as f64;
         s.preview = preview;
+        let mut lines = Vec::new();
         let fresh = if out.bursts.is_empty() {
             Vec::new()
         } else {
-            self.digest(&mut s, out.bursts)
+            self.digest(&mut s, out.bursts, &mut lines)
         };
         drop(s);
+        DebugLog::write(lines);
         self.after(fresh);
     }
 
@@ -421,18 +423,26 @@ impl Engine {
     fn bursts(&mut self, bursts: Vec<Burst>) {
         let shared = self.shared.clone();
         let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
-        let fresh = self.digest(&mut s, bursts);
+        let mut lines = Vec::new();
+        let fresh = self.digest(&mut s, bursts, &mut lines);
         drop(s);
+        DebugLog::write(lines);
         self.after(fresh);
     }
 
-    fn digest(&mut self, s: &mut Shared, bursts: Vec<Burst>) -> Vec<String> {
+    /// Updates the shared state; the debug log lines go to `lines` for the caller to write once the lock is released.
+    fn digest(
+        &mut self,
+        s: &mut Shared,
+        bursts: Vec<Burst>,
+        lines: &mut Vec<LogLine>,
+    ) -> Vec<String> {
         let mut fresh = Vec::new();
         for b in bursts {
             let system = s.source == Source::System && s.mode == Mode::Live;
             let shown = b.records.iter().filter(|r| accepted(r, system)).count();
             if let Some(log) = &self.log {
-                log.burst(&b, shown);
+                lines.extend(log.burst(&b, shown));
             }
             if b.ignored.is_some() {
                 continue;
@@ -545,5 +555,44 @@ mod tests {
         assert_eq!(e.generation, old + 1);
         e.event(msg(old, Event::Status(Status::Listening)));
         assert_ne!(e.lock().status, Status::Listening);
+    }
+
+    /// A burst that was heard but gave no record.
+    fn unreadable() -> Burst {
+        Burst {
+            start: 1.0,
+            elements: 12,
+            records: Vec::new(),
+            note: Some("too few digits".into()),
+            ignored: None,
+            span: (1.0, 3.0),
+            trace: None,
+            beeps: Vec::new(),
+            first_gap: 0.5,
+        }
+    }
+
+    #[test]
+    fn digest_leaves_the_debug_log_to_the_caller() {
+        let path =
+            std::env::temp_dir().join(format!("bunker-morse-lock-{}.log", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut e = engine(0);
+        e.log = Some(DebugLog::new(path.clone(), false));
+        let shared = e.shared.clone();
+        let mut lines = Vec::new();
+        {
+            let mut s = shared.lock().unwrap();
+            e.digest(&mut s, vec![unreadable()], &mut lines);
+        }
+        assert!(
+            !path.exists(),
+            "digest wrote a file while the lock was held"
+        );
+        assert_eq!(lines.len(), 1);
+        DebugLog::write(lines);
+        let written = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(written.contains("\"elements\":12"), "{written}");
     }
 }
