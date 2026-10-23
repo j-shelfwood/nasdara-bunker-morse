@@ -7,7 +7,7 @@ use nasdara_decoder::morse::pattern_of;
 use super::UiState;
 use super::widgets::{paint_caption, paint_symbols, symbols_width};
 use crate::engine::Shared;
-use crate::theme::{self, AMBER, DIM, FAINT, RED, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RED, RULE, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const DIGITS: usize = 10;
 /// Length above which a tone counts as a dash (dots are ~0.09 s, dashes ~0.48 s).
@@ -282,7 +282,7 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
                     Pos2::new(rect.left() + 8.0, rect.bottom() - 25.0),
                     Vec2::new(rect.width() - 16.0, 6.0),
                 );
-                painter.rect_filled(bar, 3.0, alpha(FAINT, 0.35));
+                painter.rect_filled(bar, 3.0, alpha(RULE, 0.6));
                 let share = slot.support.clamp(0.0, 1.0);
                 let (c, word) = if share >= 0.7 {
                     (TEAL, "strong")
@@ -335,7 +335,7 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
                 Align2::CENTER_CENTER,
                 "·",
                 theme::digits(rect.width() * 0.6),
-                alpha(FAINT, 0.7),
+                FAINT,
             );
         }
     }

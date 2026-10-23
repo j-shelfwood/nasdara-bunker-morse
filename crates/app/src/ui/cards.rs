@@ -8,7 +8,7 @@ use nasdara_decoder::bunkers::{MAP_SIZE, bunkers, is_izurvive_url};
 use super::UiState;
 use super::widgets::{ButtonKind, button, caption, paint_check, paint_question};
 use crate::engine::{Card, Shared};
-use crate::theme::{self, AMBER, DIM, FAINT, RED, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RED, RULE, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const CARD_W: f32 = 296.0;
 
@@ -42,7 +42,7 @@ fn empty(ui: &mut Ui) {
             rect.left_bottom(),
             rect.left_top(),
         ],
-        Stroke::new(1.0, alpha(FAINT, 0.7)),
+        Stroke::new(1.0, alpha(RULE, 0.9)),
         5.0,
         5.0,
     ));
@@ -96,12 +96,12 @@ fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
                         } else {
                             format!("heard {}×", c.count)
                         };
-                        ui.label(RichText::new(heard).font(theme::text(12.0)).color(DIM));
+                        ui.label(RichText::new(heard).font(theme::text(12.5)).color(DIM));
                     });
                 });
                 ui.label(
                     RichText::new(spaced_grid(&c.grid))
-                        .font(theme::digits(23.0))
+                        .font(theme::digits(28.0))
                         .color(TEXT)
                         .extra_letter_spacing(1.0),
                 );
@@ -333,7 +333,7 @@ pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
         Pos2::new(rect.center().x, rect.top() + 7.0),
         Align2::CENTER_CENTER,
         "N",
-        theme::bold(9.5),
+        theme::bold(11.0),
         FAINT,
     );
     let to_screen = |x: f64, z: f64| {
@@ -350,7 +350,7 @@ pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
         let card = s.cards.iter().find(|c| c.bunker == Some(b.index));
         match card {
             None => {
-                p.circle_filled(pos, 2.6, alpha(FAINT, 0.9));
+                p.circle_filled(pos, 2.6, RULE);
             }
             Some(c) => {
                 let sel = st.selected.as_deref() == Some(&c.key);
@@ -368,9 +368,9 @@ pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
                 match r {
                     // unclear: an open ring with a question mark, not a different shade
                     Reading::Unclear => {
-                        p.circle_filled(pos, 6.0, theme::BG);
-                        p.circle_stroke(pos, 6.0, Stroke::new(1.8, color));
-                        p.text(pos, Align2::CENTER_CENTER, "?", theme::bold(9.0), color);
+                        p.circle_filled(pos, 7.0, theme::BG);
+                        p.circle_stroke(pos, 7.0, Stroke::new(1.8, color));
+                        p.text(pos, Align2::CENTER_CENTER, "?", theme::bold(11.0), color);
                     }
                     Reading::Once => {
                         p.circle_filled(pos, 4.2, color);

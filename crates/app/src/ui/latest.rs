@@ -84,7 +84,7 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) -> bool {
                 tag_chip(ui, tag, accent);
                 ui.label(
                     RichText::new(r.title().to_uppercase())
-                        .font(theme::bold(16.0))
+                        .font(theme::bold(22.0))
                         .color(TEXT),
                 );
                 state_glyph(ui, r.unclear, accent);

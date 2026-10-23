@@ -109,7 +109,7 @@ pub fn show(ui: &mut Ui, s: &Shared, size: Size) {
                 Pos2::new(x, axis_y),
                 Align2::CENTER_CENTER,
                 format!("{ago} s"),
-                theme::text(10.5),
+                theme::text(11.0),
                 alpha(FAINT, fade(x)),
             );
         }
@@ -265,16 +265,16 @@ pub fn show(ui: &mut Ui, s: &Shared, size: Size) {
             Pos2::new(level.left() + 10.0, level.top() + 9.0),
             Align2::LEFT_CENTER,
             "TONE STRENGTH",
-            theme::bold(9.5),
-            alpha(FAINT, 0.9),
+            theme::bold(11.0),
+            FAINT,
         );
     }
     painter.text(
         Pos2::new(ribbon.left() + 10.0, ribbon.top() + 11.0),
         Align2::LEFT_CENTER,
         "MORSE",
-        theme::bold(9.5),
-        alpha(FAINT, 0.9),
+        theme::bold(11.0),
+        FAINT,
     );
     let _ = DIM;
 }

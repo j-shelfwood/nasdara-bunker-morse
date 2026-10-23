@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capture::{Source, Status};
 use crate::engine::{Command, Handle, Mode, Note, Shared};
-use crate::theme::{self, AMBER, DIM, FAINT, RED, STROKE, SURFACE, TEAL, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RED, RULE, STROKE, SURFACE, TEAL, alpha};
 use widgets::{ButtonKind, Pill, button, caption, card, pill, segmented};
 
 /// Smallest window the layout is built for, in points.
@@ -382,7 +382,7 @@ fn live_card(ui: &mut Ui, st: &mut UiState, s: &Shared) {
         let squeezed = compact && strip;
         if !squeezed {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(&v.headline).font(theme::bold(15.0)));
+                ui.label(RichText::new(&v.headline).font(theme::bold(20.0)));
             });
         }
         if !compact {
@@ -443,7 +443,7 @@ fn footer(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, Vec2::new(rect.width() * level, rect.height())),
             4.0,
-            if level > 0.02 { TEAL } else { FAINT },
+            if level > 0.02 { TEAL } else { RULE },
         );
         ui.label(
             RichText::new("Audio level")

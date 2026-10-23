@@ -9,7 +9,10 @@ pub const SURFACE_HI: Color32 = Color32::from_rgb(0x19, 0x1e, 0x26);
 pub const STROKE: Color32 = Color32::from_rgb(0x25, 0x2c, 0x37);
 pub const TEXT: Color32 = Color32::from_rgb(0xe6, 0xea, 0xf0);
 pub const DIM: Color32 = Color32::from_rgb(0x8b, 0x95, 0xa4);
-pub const FAINT: Color32 = Color32::from_rgb(0x4b, 0x54, 0x62);
+/// Quiet text: 4.6:1 on the lightest surface it sits on (see the contrast table in the commit message).
+pub const FAINT: Color32 = Color32::from_rgb(0x7d, 0x87, 0x96);
+/// Decorative lines, dots and empty tracks. Never for text.
+pub const RULE: Color32 = Color32::from_rgb(0x4b, 0x54, 0x62);
 pub const AMBER: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
 pub const TEAL: Color32 = Color32::from_rgb(0x3d, 0xdb, 0xd9);
 pub const RED: Color32 = Color32::from_rgb(0xff, 0x6b, 0x57);
@@ -127,7 +130,7 @@ pub fn install(ctx: &egui::Context) {
         v.widgets.inactive.bg_stroke = Stroke::new(1.0, STROKE);
         v.widgets.hovered.bg_fill = mix(SURFACE_HI, TEXT, 0.08);
         v.widgets.hovered.weak_bg_fill = mix(SURFACE_HI, TEXT, 0.08);
-        v.widgets.hovered.bg_stroke = Stroke::new(1.0, FAINT);
+        v.widgets.hovered.bg_stroke = Stroke::new(1.0, RULE);
         v.widgets.active.bg_fill = mix(SURFACE_HI, TEXT, 0.14);
         v.widgets.active.weak_bg_fill = mix(SURFACE_HI, TEXT, 0.14);
         style.spacing.item_spacing = egui::vec2(10.0, 10.0);

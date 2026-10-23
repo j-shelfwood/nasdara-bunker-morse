@@ -2,7 +2,7 @@ use egui::{
     Align2, Color32, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
 };
 
-use crate::theme::{self, AMBER, DIM, FAINT, STROKE, SURFACE, SURFACE_HI, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, RULE, STROKE, SURFACE, SURFACE_HI, TEXT, alpha};
 
 pub fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     egui::Frame::new()
@@ -197,7 +197,7 @@ pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
             } else {
                 SURFACE_HI
             },
-            Stroke::new(1.0, if response.hovered() { FAINT } else { STROKE }),
+            Stroke::new(1.0, if response.hovered() { RULE } else { STROKE }),
             TEXT,
         ),
     };

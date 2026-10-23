@@ -3,7 +3,7 @@
 use egui::{Align2, Area, Color32, Order, Pos2, Rect, RichText, Sense, Stroke, Ui, Vec2};
 
 use super::widgets::{ButtonKind, button, paint_symbols};
-use crate::theme::{self, AMBER, DIM, FAINT, STROKE, SURFACE, SURFACE_HI, TEAL, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RULE, STROKE, SURFACE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const PAGES: usize = 3;
 
@@ -139,7 +139,7 @@ fn dots(ui: &mut Ui, page: usize) {
             ui.painter()
                 .rect_filled(Rect::from_center_size(c, Vec2::new(16.0, 6.0)), 3.0, AMBER);
         } else {
-            ui.painter().circle_filled(c, 3.0, FAINT);
+            ui.painter().circle_filled(c, 3.0, RULE);
         }
     }
 }
@@ -243,7 +243,7 @@ fn radio_scene(p: &egui::Painter, rect: Rect, t: f32) {
     p.circle_stroke(
         body.center() - Vec2::new(14.0, 0.0),
         10.0,
-        Stroke::new(1.2, FAINT),
+        Stroke::new(1.2, RULE),
     );
     p.rect_filled(
         Rect::from_center_size(body.center() + Vec2::new(16.0, -8.0), Vec2::new(18.0, 6.0)),
@@ -260,14 +260,14 @@ fn radio_scene(p: &egui::Painter, rect: Rect, t: f32) {
     p.rect_stroke(
         Rect::from_center_size(origin + Vec2::new(0.0, 8.0), Vec2::new(44.0, 26.0)),
         4.0,
-        Stroke::new(1.5, FAINT),
+        Stroke::new(1.5, RULE),
         egui::StrokeKind::Inside,
     );
     p.text(
         origin + Vec2::new(0.0, -18.0),
         Align2::CENTER_CENTER,
         "bunker",
-        theme::text(11.0),
+        theme::text(12.0),
         FAINT,
     );
     for k in 0..4 {
@@ -308,7 +308,7 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
         Pos2::new(boxr.left() - 70.0, c.y - 28.0),
         Align2::CENTER_CENTER,
         "game audio",
-        theme::text(11.5),
+        theme::text(12.0),
         FAINT,
     );
     p.line_segment(
@@ -316,13 +316,13 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
             boxr.right_center() + Vec2::new(14.0, 0.0),
             boxr.right_center() + Vec2::new(70.0, 0.0),
         ],
-        Stroke::new(1.5, alpha(FAINT, 0.6)),
+        Stroke::new(1.5, alpha(RULE, 0.9)),
     );
     p.text(
         boxr.right_center() + Vec2::new(44.0, -16.0),
         Align2::CENTER_CENTER,
         "no network",
-        theme::text(11.5),
+        theme::text(12.0),
         FAINT,
     );
     p.line_segment(
