@@ -54,10 +54,12 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
                     break;
                 }
                 tx.send(Event::SessionEnded);
-                say(match ended {
-                    Ended::ProcessGone => Status::WaitingForGame,
-                    Ended::DeviceError(e) => Status::Failed(e),
-                });
+                match ended {
+                    Ended::ProcessGone => say(Status::WaitingForGame),
+                    Ended::DeviceError(e) => say(Status::Failed(e)),
+                    // the default output moved: listen again on the new one right away
+                    Ended::DeviceChanged => continue,
+                }
             }
             Err(e) => say(Status::Failed(e)),
         }
@@ -67,6 +69,7 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
 
 enum Ended {
     ProcessGone,
+    DeviceChanged,
     DeviceError(String),
 }
 
@@ -75,6 +78,9 @@ struct Session {
     capture: AudioCaptureClient,
     event: Handle,
     scratch: Vec<u8>,
+    /// Id of the default render device being captured (system mode); a change of default is not an error for
+    /// Windows, the old device just keeps working, so it is polled.
+    device: Option<String>,
 }
 
 impl Session {
@@ -85,11 +91,15 @@ impl Session {
             autoconvert: true,
             buffer_duration_hns: 0,
         };
+        let mut device = None;
         let mut client = match pid {
             Some(pid) => activate_loopback(pid, stop),
             None => DeviceEnumerator::new()
                 .and_then(|e| e.get_default_device(&Direction::Render))
-                .and_then(|d| d.get_iaudioclient())
+                .and_then(|d| {
+                    device = d.get_id().ok();
+                    d.get_iaudioclient()
+                })
                 .map_err(|e| e.to_string()),
         }
         .map_err(|e| format!("No audio device: {e}"))?;
@@ -104,12 +114,14 @@ impl Session {
             capture,
             event,
             scratch: vec![0; 8192 * 4],
+            device,
         })
     }
 
     fn pump(&mut self, tx: &Sink, stop: &AtomicBool, process: Option<&Process>) -> Ended {
         let mut pacer = Pacer::new(Instant::now());
         let mut next_alive = Instant::now() + ALIVE_EVERY;
+        let mut next_device = Instant::now() + PROBE_EVERY;
         let ended = loop {
             if stop.load(Ordering::Relaxed) {
                 break Ended::ProcessGone;
@@ -124,6 +136,14 @@ impl Session {
                 next_alive = now + ALIVE_EVERY;
                 if !process.alive() {
                     break Ended::ProcessGone;
+                }
+            }
+            if let Some(device) = &self.device
+                && now >= next_device
+            {
+                next_device = now + PROBE_EVERY;
+                if default_render_id().is_some_and(|id| &id != device) {
+                    break Ended::DeviceChanged;
                 }
             }
             let due = pacer.due(now);
@@ -166,6 +186,13 @@ impl Session {
             }));
         }
     }
+}
+
+fn default_render_id() -> Option<String> {
+    DeviceEnumerator::new()
+        .and_then(|e| e.get_default_device(&Direction::Render))
+        .and_then(|d| d.get_id())
+        .ok()
 }
 
 /// How long Windows may take to answer the per-process activation before the attempt is abandoned.
