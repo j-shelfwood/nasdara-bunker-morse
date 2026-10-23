@@ -634,6 +634,18 @@ mod tests {
     }
 
     #[test]
+    fn test_mode_switches_on_and_back_to_the_chosen_source() {
+        let mut e = engine(0);
+        let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+        e.command(Command::StartDemo, &tx);
+        assert_eq!(e.lock().mode, Mode::Demo);
+        assert_eq!(e.lock().status, Status::Listening);
+        e.command(Command::SetSource(Source::System), &tx);
+        assert_eq!(e.lock().mode, Mode::Live);
+        assert_eq!(e.lock().source, Source::System);
+    }
+
+    #[test]
     fn a_restart_retires_the_queued_events_of_the_old_capture() {
         let mut e = engine(0);
         let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);

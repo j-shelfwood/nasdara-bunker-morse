@@ -300,6 +300,22 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
                     "Reduce motion (no pulses, glows or blinking)",
                 );
                 ui.separator();
+                let mut test = s.mode == Mode::Demo;
+                if ui
+                    .checkbox(&mut test, "Test mode: a simulated broadcast")
+                    .on_hover_text(
+                        "Plays a made-up transmission on repeat, to try the window without the game. \
+                         Turning it on or off forgets the bunkers heard so far.",
+                    )
+                    .changed()
+                {
+                    engine.send(if test {
+                        Command::StartDemo
+                    } else {
+                        Command::SetSource(st.settings.source)
+                    });
+                    engine.send(Command::ClearCards);
+                }
                 if ui.button("Forget the bunkers heard so far").clicked() {
                     engine.send(Command::ClearCards);
                 }
@@ -321,7 +337,11 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
 fn status_chip(s: &Shared, time: f32) -> (String, egui::Color32, f32) {
     let breathe = |speed: f32| (time * speed).fract();
     if s.mode == Mode::Demo {
-        return ("Demo, not real audio".into(), theme::BLUE, breathe(0.8));
+        return (
+            "Test mode, not real audio".into(),
+            theme::BLUE,
+            breathe(0.8),
+        );
     }
     if s.receiving() {
         return ("Receiving a transmission".into(), AMBER, breathe(1.6));
