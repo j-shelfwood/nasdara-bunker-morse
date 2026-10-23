@@ -1,5 +1,6 @@
 name: Bug report
 description: Something did not decode, or the app misbehaved
+labels: [bug]
 body:
   - type: textarea
     id: what
@@ -21,8 +22,20 @@ body:
     id: log
     attributes:
       label: Decoder log (optional)
-      description: Start the app with `--log decode.log --trace` and paste the relevant lines. The log holds beep timings and digits, no audio.
+      description: |
+        Start the app with `--log decode.log --trace`, then attach both `decode.log` and `decode.log.trace.jsonl`
+        (`--trace` writes the second file). The logs hold beep timings and digits, no audio.
   - type: input
-    id: version
+    id: app-version
     attributes:
-      label: App version and Windows version
+      label: App version
+      description: The release you downloaded, for example v0.1.0.
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: Windows version
+      description: For example Windows 11 23H2, from Settings > System > About.
+    validations:
+      required: true
