@@ -1,5 +1,7 @@
+pub(crate) mod anim;
 mod cards;
 mod guide;
+pub(crate) mod hud;
 mod island;
 mod latest;
 mod onboarding;
