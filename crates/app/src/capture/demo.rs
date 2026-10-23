@@ -1,13 +1,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use super::{Event, SAMPLE_RATE, Status};
+use super::{Event, SAMPLE_RATE, Sink, Status};
 
 /// Feeds a clip into the engine in 10 ms steps, `speed` times faster than real time.
-pub fn play(pcm: Vec<i16>, speed: f64, tx: Sender<Event>, stop: Arc<AtomicBool>) {
-    let _ = tx.send(Event::Status(Status::Listening));
+pub fn play(pcm: Vec<i16>, speed: f64, sink: Sink, stop: Arc<AtomicBool>) {
+    sink.send(Event::Status(Status::Listening), &stop);
     let step = (SAMPLE_RATE as f64 / 100.0 * speed) as usize;
     let started = Instant::now();
     let mut at = 0;
@@ -15,7 +14,9 @@ pub fn play(pcm: Vec<i16>, speed: f64, tx: Sender<Event>, stop: Arc<AtomicBool>)
         let due = (started.elapsed().as_secs_f64() * 100.0) as usize * step;
         while at < due.min(pcm.len()) {
             let end = (at + step).min(pcm.len());
-            if tx.send(Event::Samples(pcm[at..end].to_vec())).is_err() {
+            if stop.load(Ordering::Relaxed)
+                || !sink.send(Event::Samples(pcm[at..end].to_vec()), &stop)
+            {
                 return;
             }
             at = end;
@@ -23,6 +24,6 @@ pub fn play(pcm: Vec<i16>, speed: f64, tx: Sender<Event>, stop: Arc<AtomicBool>)
         std::thread::sleep(Duration::from_millis(5));
     }
     if !stop.load(Ordering::Relaxed) {
-        let _ = tx.send(Event::DemoFinished);
+        sink.send(Event::DemoFinished, &stop);
     }
 }

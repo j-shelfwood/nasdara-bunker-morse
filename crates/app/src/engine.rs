@@ -1,7 +1,7 @@
 //! The listening side: takes audio from a source, runs the decoder and keeps the state the window draws.
 
 use std::collections::VecDeque;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -11,8 +11,8 @@ use nasdara_decoder::ledger::BunkerLedger;
 use nasdara_decoder::pipeline::{Pipeline, Preview};
 use nasdara_decoder::synth;
 
-use crate::capture::{Capture, Event, Source, Status};
-use crate::log::DebugLog;
+use crate::capture::{CHANNEL_CAPACITY, Capture, Event, Message, Source, Status};
+use crate::log::{DebugLog, LogLine};
 
 /// How much history the window can draw.
 pub const HISTORY_S: f64 = 60.0;
@@ -99,6 +99,8 @@ pub struct Shared {
     /// Cards that appeared or changed since the window last looked.
     pub changed: Vec<String>,
     pub demo_done: bool,
+    /// `false` once the engine thread has ended for any reason, a panic included; nothing updates after that.
+    pub engine_alive: bool,
 }
 
 impl Shared {
@@ -121,6 +123,7 @@ impl Shared {
             silent_for: 0.0,
             changed: Vec::new(),
             demo_done: false,
+            engine_alive: true,
         }
     }
 
@@ -131,7 +134,8 @@ impl Shared {
 
     /// A transmission is coming in: beeps heard recently and enough of them to be a message.
     pub fn receiving(&self) -> bool {
-        self.burst_beeps >= 4
+        self.status == Status::Listening
+            && self.burst_beeps >= 4
             && self
                 .beeps
                 .back()
@@ -171,21 +175,7 @@ pub fn start(source: Source, ctx: egui::Context, log: Option<DebugLog>) -> Handl
         shared: shared.clone(),
         commands,
     };
-    let engine = Engine {
-        shared,
-        ctx,
-        log,
-        pipeline: Pipeline::new(),
-        ledger: BunkerLedger::new(),
-        capture: None,
-        source,
-        mode: Mode::Live,
-        tone_on: false,
-        open: None,
-        last_beep_end: f64::NEG_INFINITY,
-        silent_samples: 0,
-        peak: 0.0,
-    };
+    let engine = Engine::new(shared, ctx, log, source);
     std::thread::Builder::new()
         .name("engine".into())
         .spawn(move || engine.run(command_rx))
@@ -200,6 +190,12 @@ struct Engine {
     pipeline: Pipeline,
     ledger: BunkerLedger,
     capture: Option<Capture>,
+    /// The note about dropped audio is added once per session.
+    drops_noted: bool,
+    /// Packets Windows flagged as discontinuous this session, and whether the note was added.
+    gaps: u64,
+    /// Session counter: bumped on every restart; events of an older generation belong to a replaced capture.
+    generation: u64,
     source: Source,
     mode: Mode,
     tone_on: bool,
@@ -210,8 +206,38 @@ struct Engine {
 }
 
 impl Engine {
+    fn new(
+        shared: Arc<Mutex<Shared>>,
+        ctx: egui::Context,
+        log: Option<DebugLog>,
+        source: Source,
+    ) -> Engine {
+        Engine {
+            shared,
+            ctx,
+            log,
+            pipeline: Pipeline::new(),
+            ledger: BunkerLedger::new(),
+            capture: None,
+            drops_noted: false,
+            gaps: 0,
+            generation: 0,
+            source,
+            mode: Mode::Live,
+            tone_on: false,
+            open: None,
+            last_beep_end: f64::NEG_INFINITY,
+            silent_samples: 0,
+            peak: 0.0,
+        }
+    }
+
     fn run(mut self, commands: Receiver<Command>) {
-        let (tx, events) = mpsc::channel();
+        let _alive = AliveGuard {
+            shared: self.shared.clone(),
+            ctx: self.ctx.clone(),
+        };
+        let (tx, events) = mpsc::sync_channel(CHANNEL_CAPACITY);
         self.restart(&tx);
         loop {
             while let Ok(c) = commands.try_recv() {
@@ -222,16 +248,15 @@ impl Engine {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+            let dropped = self.capture.as_ref().map_or(0, Capture::take_dropped);
+            self.note_drops(dropped);
         }
     }
 
-    fn restart(&mut self, tx: &Sender<Event>) {
+    fn restart(&mut self, tx: &SyncSender<Message>) {
         self.capture = None;
-        self.pipeline = Pipeline::new();
-        self.tone_on = false;
-        self.open = None;
-        self.last_beep_end = f64::NEG_INFINITY;
-        self.silent_samples = 0;
+        self.generation += 1;
+        self.reset_stream();
         let (mode, speed) = (
             self.mode,
             if self.mode == Mode::Demo {
@@ -259,13 +284,70 @@ impl Engine {
             };
         }
         self.capture = Some(match mode {
-            Mode::Live => Capture::live(self.source, tx.clone()),
-            Mode::Demo => Capture::demo(synth::demo_transmission(7), DEMO_SPEED, tx.clone()),
+            Mode::Live => Capture::live(self.source, self.generation, tx.clone()),
+            Mode::Demo => Capture::demo(
+                synth::demo_transmission(7),
+                DEMO_SPEED,
+                self.generation,
+                tx.clone(),
+            ),
         });
         self.ctx.request_repaint();
     }
 
-    fn command(&mut self, c: Command, tx: &Sender<Event>) {
+    fn note_drops(&mut self, dropped: u64) {
+        if dropped == 0 || self.drops_noted {
+            return;
+        }
+        self.drops_noted = true;
+        let mut s = self.lock();
+        s.notes.push(Note::Warn(
+            "Audio was dropped because the app fell behind".into(),
+        ));
+        trim_notes(&mut s.notes);
+        drop(s);
+        self.ctx.request_repaint();
+    }
+
+    /// A fresh decoder and beep tracker for a new stream.
+    fn reset_stream(&mut self) {
+        self.pipeline = Pipeline::new();
+        self.drops_noted = false;
+        self.gaps = 0;
+        self.tone_on = false;
+        self.open = None;
+        self.last_beep_end = f64::NEG_INFINITY;
+        self.silent_samples = 0;
+    }
+
+    /// The capture ended: close what is open, hand the decoder's pending burst through the normal path and start a
+    /// new stream, so nothing stays frozen on the old clock until the next session.
+    fn session_ended(&mut self) {
+        {
+            let shared = self.shared.clone();
+            let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
+            let t = s.clock;
+            self.close_beep(&mut s, t);
+        }
+        let bursts = self.pipeline.flush();
+        self.bursts(bursts);
+        {
+            let mut s = self.lock();
+            s.frames.clear();
+            s.beeps.clear();
+            s.burst_beeps = 0;
+            s.preview = None;
+            s.clock = 0.0;
+            s.clock_at = Instant::now();
+            s.level = 0.0;
+            s.silent_for = 0.0;
+        }
+        self.reset_stream();
+        self.peak = 0.0;
+        self.ctx.request_repaint();
+    }
+
+    fn command(&mut self, c: Command, tx: &SyncSender<Message>) {
         match c {
             Command::SetSource(source) => {
                 self.source = source;
@@ -296,13 +378,29 @@ impl Engine {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn event(&mut self, e: Event) {
-        match e {
+    fn event(&mut self, m: Message) {
+        if m.generation != self.generation {
+            return;
+        }
+        match m.event {
             Event::Status(status) => {
                 self.lock().status = status;
                 self.ctx.request_repaint();
             }
             Event::Samples(pcm) => self.samples(&pcm),
+            Event::Discontinuity(n) => {
+                self.gaps += u64::from(n);
+                if self.gaps == u64::from(n) {
+                    let mut s = self.lock();
+                    s.notes.push(Note::Warn(
+                        "Windows reported missing audio; a digit may be misread".into(),
+                    ));
+                    trim_notes(&mut s.notes);
+                    drop(s);
+                    self.ctx.request_repaint();
+                }
+            }
+            Event::SessionEnded => self.session_ended(),
             Event::DemoFinished => {
                 // the demo clip ends in silence, so a final burst may still be open
                 let bursts = self.pipeline.flush();
@@ -345,12 +443,14 @@ impl Engine {
         s.level = self.peak;
         s.silent_for = self.silent_samples as f64 / crate::capture::SAMPLE_RATE as f64;
         s.preview = preview;
+        let mut lines = Vec::new();
         let fresh = if out.bursts.is_empty() {
             Vec::new()
         } else {
-            self.digest(&mut s, out.bursts)
+            self.digest(&mut s, out.bursts, &mut lines)
         };
         drop(s);
+        DebugLog::write(lines);
         self.after(fresh);
     }
 
@@ -382,9 +482,15 @@ impl Engine {
                     }
                 }
             }
-        } else if !on
-            && self.tone_on
-            && let Some(i) = self.open.take()
+        } else if !on && self.tone_on {
+            self.close_beep(s, t);
+        }
+        self.tone_on = on;
+    }
+
+    /// Ends the open beep at `t`; one shorter than a real beep is a glitch and disappears.
+    fn close_beep(&mut self, s: &mut Shared, t: f64) {
+        if let Some(i) = self.open.take()
             && let Some(b) = s.beeps.get_mut(i)
         {
             b.end = Some(t);
@@ -394,24 +500,32 @@ impl Engine {
                 s.burst_beeps = s.burst_beeps.saturating_sub(1);
             }
         }
-        self.tone_on = on;
+        self.tone_on = false;
     }
 
     fn bursts(&mut self, bursts: Vec<Burst>) {
         let shared = self.shared.clone();
         let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
-        let fresh = self.digest(&mut s, bursts);
+        let mut lines = Vec::new();
+        let fresh = self.digest(&mut s, bursts, &mut lines);
         drop(s);
+        DebugLog::write(lines);
         self.after(fresh);
     }
 
-    fn digest(&mut self, s: &mut Shared, bursts: Vec<Burst>) -> Vec<String> {
+    /// Updates the shared state; the debug log lines go to `lines` for the caller to write once the lock is released.
+    fn digest(
+        &mut self,
+        s: &mut Shared,
+        bursts: Vec<Burst>,
+        lines: &mut Vec<LogLine>,
+    ) -> Vec<String> {
         let mut fresh = Vec::new();
         for b in bursts {
             let system = s.source == Source::System && s.mode == Mode::Live;
             let shown = b.records.iter().filter(|r| accepted(r, system)).count();
             if let Some(log) = &self.log {
-                log.burst(&b, shown);
+                lines.extend(log.burst(&b, shown));
             }
             if b.ignored.is_some() {
                 continue;
@@ -419,6 +533,7 @@ impl Engine {
             if b.records.is_empty() {
                 if let Some(note) = &b.note {
                     s.notes.push(Note::Info(format!("A transmission of {} beeps was heard but could not be read ({note}). It repeats, so keep listening.", b.elements)));
+                    trim_notes(&mut s.notes);
                 }
                 continue;
             }
@@ -455,10 +570,7 @@ impl Engine {
                 s.burst_beeps = 0;
                 fresh.push(e.key);
             }
-            if s.notes.len() > 4 {
-                let cut = s.notes.len() - 4;
-                s.notes.drain(..cut);
-            }
+            trim_notes(&mut s.notes);
         }
         s.changed.extend(fresh.iter().cloned());
         fresh
@@ -471,8 +583,243 @@ impl Engine {
     }
 }
 
+/// Marks the engine as gone when its thread ends, on any path.
+struct AliveGuard {
+    shared: Arc<Mutex<Shared>>,
+    ctx: egui::Context,
+}
+
+impl Drop for AliveGuard {
+    fn drop(&mut self) {
+        self.shared
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .engine_alive = false;
+        self.ctx.request_repaint();
+    }
+}
+
+const MAX_NOTES: usize = 4;
+
+fn trim_notes(notes: &mut Vec<Note>) {
+    if notes.len() > MAX_NOTES {
+        let cut = notes.len() - MAX_NOTES;
+        notes.drain(..cut);
+    }
+}
+
 fn accepted(r: &BunkerRecord, system: bool) -> bool {
     // system-wide audio holds music and voice: only a message whose grid is a real bunker counts
     let known = r.snap.kind() != SnapKind::None;
     known || (!system && r.grid.chars().all(|c| c.is_ascii_digit()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine(generation: u64) -> Engine {
+        let shared = Arc::new(Mutex::new(Shared::new(Source::Game)));
+        let mut e = Engine::new(shared, egui::Context::default(), None, Source::Game);
+        e.generation = generation;
+        e
+    }
+
+    fn msg(generation: u64, event: Event) -> Message {
+        Message { generation, event }
+    }
+
+    #[test]
+    fn events_of_a_replaced_capture_are_dropped() {
+        let mut e = engine(3);
+        e.event(msg(2, Event::Status(Status::Listening)));
+        assert_eq!(e.lock().status, Status::WaitingForGame);
+        e.event(msg(2, Event::Samples(synth::demo_transmission(7))));
+        assert!(e.lock().frames.is_empty());
+        e.event(msg(2, Event::DemoFinished));
+        assert!(!e.lock().demo_done);
+    }
+
+    #[test]
+    fn events_of_the_current_capture_are_applied() {
+        let mut e = engine(3);
+        e.event(msg(3, Event::Status(Status::Listening)));
+        assert_eq!(e.lock().status, Status::Listening);
+        e.event(msg(3, Event::Samples(vec![0; 4410])));
+        assert!(!e.lock().frames.is_empty());
+        e.event(msg(3, Event::DemoFinished));
+        assert!(e.lock().demo_done);
+    }
+
+    #[test]
+    fn a_restart_retires_the_queued_events_of_the_old_capture() {
+        let mut e = engine(0);
+        let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+        e.restart(&tx);
+        let old = e.generation;
+        e.command(Command::StopDemo, &tx);
+        assert_eq!(e.generation, old + 1);
+        e.event(msg(old, Event::Status(Status::Listening)));
+        assert_ne!(e.lock().status, Status::Listening);
+    }
+
+    /// A burst that was heard but gave no record.
+    fn unreadable() -> Burst {
+        Burst {
+            start: 1.0,
+            elements: 12,
+            records: Vec::new(),
+            note: Some("too few digits".into()),
+            ignored: None,
+            span: (1.0, 3.0),
+            trace: None,
+            beeps: Vec::new(),
+            first_gap: 0.5,
+        }
+    }
+
+    #[test]
+    fn digest_leaves_the_debug_log_to_the_caller() {
+        let path =
+            std::env::temp_dir().join(format!("bunker-morse-lock-{}.log", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut e = engine(0);
+        e.log = Some(DebugLog::new(path.clone(), false));
+        let shared = e.shared.clone();
+        let mut lines = Vec::new();
+        {
+            let mut s = shared.lock().unwrap();
+            e.digest(&mut s, vec![unreadable()], &mut lines);
+        }
+        assert!(
+            !path.exists(),
+            "digest wrote a file while the lock was held"
+        );
+        assert_eq!(lines.len(), 1);
+        DebugLog::write(lines);
+        let written = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(written.contains("\"elements\":12"), "{written}");
+    }
+
+    #[test]
+    fn notes_stay_trimmed_when_bursts_are_unreadable() {
+        let mut e = engine(0);
+        let shared = e.shared.clone();
+        let mut s = shared.lock().unwrap();
+        for _ in 0..50 {
+            e.digest(&mut s, vec![unreadable()], &mut Vec::new());
+        }
+        assert_eq!(s.notes.len(), MAX_NOTES);
+    }
+
+    fn open_beep(e: &Engine, beeps: usize) {
+        let mut s = e.lock();
+        s.status = Status::Listening;
+        s.clock = 10.0;
+        s.burst_beeps = beeps;
+        for i in 0..beeps {
+            s.beeps.push_back(Beep {
+                start: 1.0 + i as f64,
+                end: if i + 1 == beeps {
+                    None
+                } else {
+                    Some(1.5 + i as f64)
+                },
+            });
+        }
+        s.preview = None;
+    }
+
+    #[test]
+    fn receiving_needs_a_listening_status() {
+        let e = engine(0);
+        open_beep(&e, 5);
+        assert!(e.lock().receiving());
+        e.lock().status = Status::WaitingForGame;
+        assert!(!e.lock().receiving());
+    }
+
+    #[test]
+    fn a_ended_session_closes_the_open_beep_and_starts_a_clean_stream() {
+        let mut e = engine(1);
+        open_beep(&e, 5);
+        e.open = Some(4);
+        e.tone_on = true;
+        e.event(msg(1, Event::SessionEnded));
+        let s = e.lock();
+        assert!(s.beeps.is_empty() && s.frames.is_empty());
+        assert_eq!(s.burst_beeps, 0);
+        assert!(s.preview.is_none());
+        assert!(!s.receiving());
+        drop(s);
+        assert!(e.open.is_none() && !e.tone_on);
+        assert_eq!(e.pipeline.pending(), 0);
+    }
+
+    #[test]
+    fn a_ended_session_flushes_the_pending_burst() {
+        let pcm = synth::demo_transmission(7);
+        // stop right after the last loud sample, before the silence that would end the burst by itself
+        let end = pcm.iter().rposition(|s| s.unsigned_abs() > 2000).unwrap();
+        let mut e = engine(1);
+        for c in synth::chunks(&pcm[..end]) {
+            e.event(msg(1, Event::Samples(c.to_vec())));
+        }
+        let heard: usize = e.lock().cards.iter().map(|c| c.count).sum();
+        e.event(msg(1, Event::SessionEnded));
+        let after: usize = e.lock().cards.iter().map(|c| c.count).sum();
+        assert!(
+            after > heard,
+            "heard {heard} before, {after} after the flush"
+        );
+    }
+
+    #[test]
+    fn dropped_audio_adds_one_note_per_session() {
+        let mut e = engine(0);
+        e.note_drops(0);
+        assert!(e.lock().notes.is_empty());
+        e.note_drops(3);
+        e.note_drops(7);
+        assert_eq!(e.lock().notes.len(), 1);
+        let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+        e.restart(&tx);
+        e.note_drops(1);
+        assert_eq!(e.lock().notes.len(), 2);
+    }
+
+    #[test]
+    fn discontinuities_are_counted_and_noted_once_per_session() {
+        let mut e = engine(1);
+        e.event(msg(1, Event::Discontinuity(2)));
+        e.event(msg(1, Event::Discontinuity(1)));
+        assert_eq!(e.gaps, 3);
+        assert_eq!(e.lock().notes.len(), 1);
+        e.event(msg(1, Event::SessionEnded));
+        e.event(msg(1, Event::Discontinuity(1)));
+        assert_eq!(e.lock().notes.len(), 2);
+    }
+
+    #[test]
+    fn a_dying_engine_thread_clears_engine_alive() {
+        let shared = Arc::new(Mutex::new(Shared::new(Source::Game)));
+        assert!(shared.lock().unwrap().engine_alive);
+        let guard = AliveGuard {
+            shared: shared.clone(),
+            ctx: egui::Context::default(),
+        };
+        let died = std::thread::spawn(move || {
+            let _guard = guard;
+            panic!("engine test panic");
+        })
+        .join();
+        assert!(died.is_err());
+        assert!(
+            !shared
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .engine_alive
+        );
+    }
 }

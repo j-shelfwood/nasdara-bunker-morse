@@ -6,6 +6,14 @@ use std::path::PathBuf;
 
 use nasdara_decoder::bursts::Burst;
 
+/// One line bound for a file. Built under the engine's lock, written after it is released: opening a file can take
+/// tens of milliseconds when antivirus scans it, and the window waits on that lock.
+#[derive(Debug, PartialEq)]
+pub struct LogLine {
+    path: PathBuf,
+    text: String,
+}
+
 pub struct DebugLog {
     path: PathBuf,
     trace: bool,
@@ -16,7 +24,8 @@ impl DebugLog {
         DebugLog { path, trace }
     }
 
-    pub fn burst(&self, b: &Burst, shown: usize) {
+    pub fn burst(&self, b: &Burst, shown: usize) -> Vec<LogLine> {
+        let mut out = Vec::new();
         let records: Vec<_> = b
             .records
             .iter()
@@ -37,12 +46,26 @@ impl DebugLog {
             "records": records,
             "beeps": b.beeps.iter().map(|x| [round2(x.start), round2(x.dur)]).collect::<Vec<_>>(),
         });
-        append(&self.path, &line.to_string());
+        out.push(LogLine {
+            path: self.path.clone(),
+            text: line.to_string(),
+        });
         if let (true, Some(trace)) = (self.trace, &b.trace) {
             let t = serde_json::json!({ "at": unix_seconds(), "t0": trace.t0, "db": trace.db });
             let mut name = self.path.clone().into_os_string();
             name.push(".trace.jsonl");
-            append(&PathBuf::from(name), &t.to_string());
+            out.push(LogLine {
+                path: PathBuf::from(name),
+                text: t.to_string(),
+            });
+        }
+        out
+    }
+
+    /// Appends the lines to their files.
+    pub fn write(lines: Vec<LogLine>) {
+        for l in lines {
+            append(&l.path, &l.text);
         }
     }
 }
