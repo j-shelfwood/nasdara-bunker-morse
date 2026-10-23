@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use wasapi::{
@@ -16,15 +15,15 @@ use windows::Win32::System::Threading::{
 };
 
 use super::pacer::Pacer;
-use super::{Event, SAMPLE_RATE, Source, Status};
+use super::{Event, SAMPLE_RATE, Sink, Source, Status};
 
 const GAME_EXE: &str = "DayZ_x64.exe";
 const PROBE_EVERY: Duration = Duration::from_secs(2);
 const ALIVE_EVERY: Duration = Duration::from_millis(500);
 
-pub fn run(source: Source, tx: Sender<Event>, stop: Arc<AtomicBool>) {
+pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
     if initialize_mta().is_err() {
-        let _ = tx.send(Event::Status(Status::Failed(
+        tx.send(Event::Status(Status::Failed(
             "Windows audio could not be initialised".into(),
         )));
         return;
@@ -33,7 +32,7 @@ pub fn run(source: Source, tx: Sender<Event>, stop: Arc<AtomicBool>) {
     let mut say = |s: Status| {
         if last.as_ref() != Some(&s) {
             last = Some(s.clone());
-            let _ = tx.send(Event::Status(s));
+            tx.send(Event::Status(s));
         }
     };
     while !stop.load(Ordering::Relaxed) {
@@ -107,7 +106,7 @@ impl Session {
         })
     }
 
-    fn pump(&mut self, tx: &Sender<Event>, stop: &AtomicBool, pid: Option<u32>) -> Ended {
+    fn pump(&mut self, tx: &Sink, stop: &AtomicBool, pid: Option<u32>) -> Ended {
         let mut pacer = Pacer::new(Instant::now());
         let mut next_alive = Instant::now() + ALIVE_EVERY;
         let ended = loop {
@@ -127,7 +126,7 @@ impl Session {
                 }
             }
             let due = pacer.due(now);
-            if !due.is_empty() && tx.send(Event::Samples(due)).is_err() {
+            if !due.is_empty() && !tx.send(Event::Samples(due)) {
                 break Ended::ProcessGone;
             }
             // wakes on new audio; times out when nothing plays, which is when the pacer supplies the silence

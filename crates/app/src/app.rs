@@ -161,12 +161,12 @@ fn probe(seconds: u64, report: &PathBuf, source: Source) {
     use std::time::{Duration, Instant};
 
     let (tx, rx) = std::sync::mpsc::channel();
-    let _capture = Capture::live(source, tx);
+    let _capture = Capture::live(source, 0, tx);
     let started = Instant::now();
     let (mut samples, mut peak, mut statuses) = (0usize, 0i16, Vec::new());
     let mut stream_seconds = Vec::new();
     while started.elapsed() < Duration::from_secs(seconds) {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(100)).map(|m| m.event) {
             Ok(Event::Status(s)) => {
                 statuses.push(format!("{:.1}s {s:?}", started.elapsed().as_secs_f32()))
             }

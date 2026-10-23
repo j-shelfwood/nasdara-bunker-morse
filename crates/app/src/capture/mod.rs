@@ -39,19 +39,51 @@ pub enum Event {
     DemoFinished,
 }
 
+/// An event tagged with the session (generation) of the capture that produced it. The engine drops events of
+/// captures it has already replaced, because their thread may still be running and its events still queued.
+pub struct Message {
+    pub generation: u64,
+    pub event: Event,
+}
+
+/// What a capture thread sends through: tags every event with the generation the capture was created with.
+#[derive(Clone)]
+pub struct Sink {
+    generation: u64,
+    tx: Sender<Message>,
+}
+
+impl Sink {
+    pub fn new(generation: u64, tx: Sender<Message>) -> Sink {
+        Sink { generation, tx }
+    }
+
+    /// `false` when the engine is gone.
+    pub fn send(&self, event: Event) -> bool {
+        self.tx
+            .send(Message {
+                generation: self.generation,
+                event,
+            })
+            .is_ok()
+    }
+}
+
 pub struct Capture {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Capture {
-    pub fn live(source: Source, tx: Sender<Event>) -> Capture {
-        Self::spawn("capture", move |stop| live(source, tx, stop))
+    pub fn live(source: Source, generation: u64, tx: Sender<Message>) -> Capture {
+        let sink = Sink::new(generation, tx);
+        Self::spawn("capture", move |stop| live(source, sink, stop))
     }
 
     /// Plays `pcm` into the pipeline at `speed` times real time.
-    pub fn demo(pcm: Vec<i16>, speed: f64, tx: Sender<Event>) -> Capture {
-        Self::spawn("demo", move |stop| demo::play(pcm, speed, tx, stop))
+    pub fn demo(pcm: Vec<i16>, speed: f64, generation: u64, tx: Sender<Message>) -> Capture {
+        let sink = Sink::new(generation, tx);
+        Self::spawn("demo", move |stop| demo::play(pcm, speed, sink, stop))
     }
 
     fn spawn(name: &str, run: impl FnOnce(Arc<AtomicBool>) + Send + 'static) -> Capture {
@@ -75,13 +107,13 @@ impl Drop for Capture {
 }
 
 #[cfg(windows)]
-fn live(source: Source, tx: Sender<Event>, stop: Arc<AtomicBool>) {
-    win::run(source, tx, stop);
+fn live(source: Source, sink: Sink, stop: Arc<AtomicBool>) {
+    win::run(source, sink, stop);
 }
 
 #[cfg(not(windows))]
-fn live(_source: Source, tx: Sender<Event>, _stop: Arc<AtomicBool>) {
-    let _ = tx.send(Event::Status(Status::Failed(
+fn live(_source: Source, sink: Sink, _stop: Arc<AtomicBool>) {
+    sink.send(Event::Status(Status::Failed(
         "Live capture needs Windows. Use the demo.".into(),
     )));
 }

@@ -11,7 +11,7 @@ use nasdara_decoder::ledger::BunkerLedger;
 use nasdara_decoder::pipeline::{Pipeline, Preview};
 use nasdara_decoder::synth;
 
-use crate::capture::{Capture, Event, Source, Status};
+use crate::capture::{Capture, Event, Message, Source, Status};
 use crate::log::DebugLog;
 
 /// How much history the window can draw.
@@ -171,21 +171,7 @@ pub fn start(source: Source, ctx: egui::Context, log: Option<DebugLog>) -> Handl
         shared: shared.clone(),
         commands,
     };
-    let engine = Engine {
-        shared,
-        ctx,
-        log,
-        pipeline: Pipeline::new(),
-        ledger: BunkerLedger::new(),
-        capture: None,
-        source,
-        mode: Mode::Live,
-        tone_on: false,
-        open: None,
-        last_beep_end: f64::NEG_INFINITY,
-        silent_samples: 0,
-        peak: 0.0,
-    };
+    let engine = Engine::new(shared, ctx, log, source);
     std::thread::Builder::new()
         .name("engine".into())
         .spawn(move || engine.run(command_rx))
@@ -200,6 +186,8 @@ struct Engine {
     pipeline: Pipeline,
     ledger: BunkerLedger,
     capture: Option<Capture>,
+    /// Session counter: bumped on every restart; events of an older generation belong to a replaced capture.
+    generation: u64,
     source: Source,
     mode: Mode,
     tone_on: bool,
@@ -210,6 +198,30 @@ struct Engine {
 }
 
 impl Engine {
+    fn new(
+        shared: Arc<Mutex<Shared>>,
+        ctx: egui::Context,
+        log: Option<DebugLog>,
+        source: Source,
+    ) -> Engine {
+        Engine {
+            shared,
+            ctx,
+            log,
+            pipeline: Pipeline::new(),
+            ledger: BunkerLedger::new(),
+            capture: None,
+            generation: 0,
+            source,
+            mode: Mode::Live,
+            tone_on: false,
+            open: None,
+            last_beep_end: f64::NEG_INFINITY,
+            silent_samples: 0,
+            peak: 0.0,
+        }
+    }
+
     fn run(mut self, commands: Receiver<Command>) {
         let (tx, events) = mpsc::channel();
         self.restart(&tx);
@@ -225,8 +237,9 @@ impl Engine {
         }
     }
 
-    fn restart(&mut self, tx: &Sender<Event>) {
+    fn restart(&mut self, tx: &Sender<Message>) {
         self.capture = None;
+        self.generation += 1;
         self.pipeline = Pipeline::new();
         self.tone_on = false;
         self.open = None;
@@ -259,13 +272,18 @@ impl Engine {
             };
         }
         self.capture = Some(match mode {
-            Mode::Live => Capture::live(self.source, tx.clone()),
-            Mode::Demo => Capture::demo(synth::demo_transmission(7), DEMO_SPEED, tx.clone()),
+            Mode::Live => Capture::live(self.source, self.generation, tx.clone()),
+            Mode::Demo => Capture::demo(
+                synth::demo_transmission(7),
+                DEMO_SPEED,
+                self.generation,
+                tx.clone(),
+            ),
         });
         self.ctx.request_repaint();
     }
 
-    fn command(&mut self, c: Command, tx: &Sender<Event>) {
+    fn command(&mut self, c: Command, tx: &Sender<Message>) {
         match c {
             Command::SetSource(source) => {
                 self.source = source;
@@ -296,8 +314,11 @@ impl Engine {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn event(&mut self, e: Event) {
-        match e {
+    fn event(&mut self, m: Message) {
+        if m.generation != self.generation {
+            return;
+        }
+        match m.event {
             Event::Status(status) => {
                 self.lock().status = status;
                 self.ctx.request_repaint();
@@ -475,4 +496,54 @@ fn accepted(r: &BunkerRecord, system: bool) -> bool {
     // system-wide audio holds music and voice: only a message whose grid is a real bunker counts
     let known = r.snap.kind() != SnapKind::None;
     known || (!system && r.grid.chars().all(|c| c.is_ascii_digit()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine(generation: u64) -> Engine {
+        let shared = Arc::new(Mutex::new(Shared::new(Source::Game)));
+        let mut e = Engine::new(shared, egui::Context::default(), None, Source::Game);
+        e.generation = generation;
+        e
+    }
+
+    fn msg(generation: u64, event: Event) -> Message {
+        Message { generation, event }
+    }
+
+    #[test]
+    fn events_of_a_replaced_capture_are_dropped() {
+        let mut e = engine(3);
+        e.event(msg(2, Event::Status(Status::Listening)));
+        assert_eq!(e.lock().status, Status::WaitingForGame);
+        e.event(msg(2, Event::Samples(synth::demo_transmission(7))));
+        assert!(e.lock().frames.is_empty());
+        e.event(msg(2, Event::DemoFinished));
+        assert!(!e.lock().demo_done);
+    }
+
+    #[test]
+    fn events_of_the_current_capture_are_applied() {
+        let mut e = engine(3);
+        e.event(msg(3, Event::Status(Status::Listening)));
+        assert_eq!(e.lock().status, Status::Listening);
+        e.event(msg(3, Event::Samples(vec![0; 4410])));
+        assert!(!e.lock().frames.is_empty());
+        e.event(msg(3, Event::DemoFinished));
+        assert!(e.lock().demo_done);
+    }
+
+    #[test]
+    fn a_restart_retires_the_queued_events_of_the_old_capture() {
+        let mut e = engine(0);
+        let (tx, _rx) = mpsc::channel();
+        e.restart(&tx);
+        let old = e.generation;
+        e.command(Command::StopDemo, &tx);
+        assert_eq!(e.generation, old + 1);
+        e.event(msg(old, Event::Status(Status::Listening)));
+        assert_ne!(e.lock().status, Status::Listening);
+    }
 }
