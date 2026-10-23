@@ -277,15 +277,15 @@ fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) {
 /// ended, and a held handle keeps Windows from giving its id to another process.
 struct Process {
     pid: u32,
-    /// `None` when Windows refuses to open the process (it runs elevated): then only the capture itself can tell
-    /// that it ended.
+    /// `None` when Windows refuses to open the process (it runs elevated): liveness then comes from the process list.
     handle: Option<HANDLE>,
 }
 
 impl Process {
     fn alive(&self) -> bool {
         let Some(handle) = self.handle else {
-            return true;
+            // not openable (elevated): a process-loopback client outlives its target, so ask the process list
+            return find_pid(GAME_EXE) == Some(self.pid);
         };
         // SAFETY: the handle is owned by this value and open until it is dropped.
         unsafe { WaitForSingleObject(handle, 0) == WAIT_TIMEOUT }
