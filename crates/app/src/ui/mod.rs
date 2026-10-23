@@ -94,7 +94,7 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     }
 
     size_window(&ctx, st);
-    react_to_new_bunkers(&ctx, st, &mut s);
+    let to_open = react_to_new_bunkers(&ctx, st, &mut s);
     let on_top = st.settings.always_on_top;
     if st.on_top_sent != Some(on_top) {
         st.on_top_sent = Some(on_top);
@@ -142,6 +142,10 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
         });
 
     drop(s);
+    // opening a link can be slow: never while the engine waits for the lock
+    for url in to_open {
+        let _ = open::that(url);
+    }
     if let Some(page) = st.onboarding {
         let mut page = page;
         match onboarding::show(&ctx, &st.modal_ids, &mut page, st.settings.reduce_motion) {
@@ -184,7 +188,8 @@ fn finish_onboarding(st: &mut UiState) {
     st.settings.onboarded = true;
 }
 
-fn react_to_new_bunkers(ctx: &egui::Context, st: &mut UiState, s: &mut Shared) {
+fn react_to_new_bunkers(ctx: &egui::Context, st: &mut UiState, s: &mut Shared) -> Vec<String> {
+    let mut to_open = Vec::new();
     st.card_seen
         .retain(|key, _| s.cards.iter().any(|c| &c.key == key));
     for key in std::mem::take(&mut s.changed) {
@@ -210,9 +215,10 @@ fn react_to_new_bunkers(ctx: &egui::Context, st: &mut UiState, s: &mut Shared) {
             card.url.as_deref(),
         ) && nasdara_decoder::bunkers::is_izurvive_url(url)
         {
-            let _ = open::that(url);
+            to_open.push(url.to_string());
         }
     }
+    to_open
 }
 
 fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
@@ -344,6 +350,13 @@ fn banner(ui: &mut Ui, engine: &Handle, s: &Shared) {
     let mut lines: Vec<(egui::Color32, String, Option<&str>)> = Vec::new();
     if silent {
         lines.push((AMBER, format!("Nothing audible from DayZ for {} seconds. On some PCs Windows does not hand the game's sound to the app.", s.silent_for as u64), Some("Listen to system audio")));
+    }
+    if !s.engine_alive {
+        lines.push((
+            RED,
+            "Listening stopped unexpectedly. Close the app and open it again.".to_string(),
+            None,
+        ));
     }
     if let Status::Failed(e) = &s.status {
         lines.push((RED, e.clone(), None));

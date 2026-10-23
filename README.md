@@ -9,7 +9,7 @@ by ear hard.
 
 ![The window while a message is arriving](docs/images/receiving.png)
 
-*Screenshots show the built-in demo, which plays synthetic beeps. No game audio is used or included in this repository.*
+*The first screenshot is the built-in demo, which plays synthetic beeps. The second is a rendered test scene of a finished message. No game audio is used or included in this repository.*
 
 Unofficial fan project, not affiliated with Bohemia Interactive.
 
@@ -26,7 +26,7 @@ Unofficial fan project, not affiliated with Bohemia Interactive.
 Three of the 23 bunkers transmit at a time, one after the other, about 90 seconds each, and the cycle repeats. Every
 repeat fills in digits the previous one missed, so a card shows `?` for a digit until it has been heard clearly.
 
-![Bunker cards and the map](docs/images/cards.png)
+![The result of a finished message](docs/images/result.png)
 
 The window can stay above the game: the pin button in the header does that, and it needs the game in borderless windowed
 mode. The gear menu next to it holds the other options: flash the taskbar when a bunker is read (the flash may not be
@@ -39,6 +39,10 @@ The app listens to the audio of the DayZ process. On some PCs, mostly with virtu
 credits the game's sound to the audio engine instead, and the app hears silence. After 20 seconds of silence the window
 offers **Listen to system audio**. That mode hears everything the PC plays, so it only accepts a message whose grid is
 one of the real bunkers. Giving DayZ its own output device in the Windows volume mixer also fixes it.
+
+Capturing one program's audio needs Windows 11 or a Windows 10 build of 20348 or later, according to Microsoft's
+documentation; one of its pages gives 20438, and nothing there covers Windows 10 22H2 either way. Where the DayZ capture
+cannot start, the window says so and System audio works on any version.
 
 ### Windows warnings
 

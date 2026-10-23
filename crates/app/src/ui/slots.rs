@@ -1,7 +1,6 @@
 //! The ten digit slots of a bunker message: six grid digits and four lock code digits.
 
 use egui::{Align2, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
-use nasdara_decoder::grid::SHIPPED_TIMING;
 use nasdara_decoder::morse::pattern_of;
 
 use super::UiState;
@@ -12,8 +11,6 @@ use crate::theme::{self, AMBER, DIM, FAINT, RED, RULE, STROKE, SURFACE_HI, TEAL,
 const DIGITS: usize = 10;
 /// Length above which a tone counts as a dash (dots are ~0.09 s, dashes ~0.48 s).
 pub const DASH_FROM_S: f64 = 0.28;
-/// Extra wait after the next digit's expected start before the previous digit counts as complete.
-const SETTLE_S: f64 = 0.9;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -53,14 +50,14 @@ pub fn view(s: &Shared) -> View {
     let mut live_symbols = String::new();
     if s.receiving() {
         let preview = s.preview.as_ref();
-        // The last digit of a partial trace is fitted to beeps that may still be arriving (three dashes of a 0 look
-        // like a 2 with its dots lost), so it counts only once the next digit's first beep is due and has not come.
+        // The decoder marks the trailing digit unsettled while its beeps may still be arriving (three dashes of a 0
+        // look like a 2 with its dots lost); only settled digits are shown.
         let settled = preview.map_or(0, |p| {
-            let last_settled = p
-                .digits
-                .last()
-                .is_some_and(|d| now > d.window_end + SHIPPED_TIMING.digit_gap + SETTLE_S);
-            p.digits.len().min(DIGITS) - usize::from(!last_settled && !p.digits.is_empty())
+            p.digits
+                .iter()
+                .take(DIGITS)
+                .take_while(|d| d.settled)
+                .count()
         });
         if let Some(p) = preview {
             for (i, d) in p.digits.iter().take(settled).enumerate() {

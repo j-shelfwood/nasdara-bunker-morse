@@ -80,7 +80,7 @@ pub fn run() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("Bunker Morse")
             .with_inner_size([1060.0, 800.0])
-            .with_min_inner_size([900.0, 620.0])
+            .with_min_inner_size([760.0, 520.0])
             .with_icon(icon),
         ..Default::default()
     };
