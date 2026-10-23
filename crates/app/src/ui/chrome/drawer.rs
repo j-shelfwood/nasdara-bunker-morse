@@ -1,8 +1,6 @@
 //! The right column of a wide window and, below 900 points, the drawer that holds the same content.
 
-use egui::{
-    Align, Area, Id, Layout, Order, Rect, RichText, ScrollArea, Stroke, Ui, UiBuilder, Vec2,
-};
+use egui::{Area, Id, Order, Rect, RichText, ScrollArea, Stroke, Ui, UiBuilder, Vec2};
 
 use crate::engine::Shared;
 use crate::theme::{self, DIM, STROKE, SURFACE};
@@ -17,8 +15,9 @@ fn heard(s: &Shared) -> usize {
     s.cards.iter().filter(|c| c.bunker.is_some()).count()
 }
 
-/// The result strip and the bunkers list under it.
-fn strip_and_list(ui: &mut Ui, st: &mut UiState, s: &Shared) {
+/// The result strip, then the bunkers list; the cheat sheet closes the scrolling list when `with_guide` and the
+/// setting is on. Everything flows top-down: the panels place their content from the top of the space on offer.
+fn content(ui: &mut Ui, st: &mut UiState, s: &Shared, with_guide: bool) {
     latest::show(ui, st, s);
     ui.horizontal(|ui| {
         caption(ui, "Bunkers heard");
@@ -30,26 +29,12 @@ fn strip_and_list(ui: &mut Ui, st: &mut UiState, s: &Shared) {
     });
     ScrollArea::vertical()
         .auto_shrink([false, false])
-        .show(ui, |ui| bunkers::show(ui, st, s));
-}
-
-/// Strip and list; the cheat sheet takes the bottom when `with_guide` and the setting is on.
-fn content(ui: &mut Ui, st: &mut UiState, s: &Shared, with_guide: bool) {
-    if !(with_guide && st.settings.show_guide) {
-        strip_and_list(ui, st, s);
-        return;
-    }
-    // bottom-up: the cheat sheet claims its height first, the rest goes to the strip and the list above it
-    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-        guide::show(ui, st, s);
-        let rest = ui.available_rect_before_wrap();
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(rest)
-                .layout(Layout::top_down(Align::Min)),
-            |ui| strip_and_list(ui, st, s),
-        );
-    });
+        .show(ui, |ui| {
+            bunkers::show(ui, st, s);
+            if with_guide && st.settings.show_guide {
+                guide::show(ui, st, s);
+            }
+        });
 }
 
 /// The fixed column of a wide window.

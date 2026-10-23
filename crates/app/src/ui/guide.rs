@@ -8,7 +8,7 @@ use nasdara_decoder::morse::pattern_of;
 use super::anim::Motion;
 use super::hud::{Panel, paint_focus, paint_frame, panel};
 use super::widgets::{caption, paint_symbols_with, symbols_width};
-use super::{UiState, slots};
+use super::{UiState, bar};
 use crate::engine::Shared;
 use crate::theme::{self, AMBER, DIM, RULE, STROKE, SURFACE_HI, TEXT, mix};
 
@@ -98,7 +98,7 @@ fn symbols_center(rect: Rect) -> egui::Pos2 {
 }
 
 pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
-    let live = slots::live_symbols(s);
+    let live = bar::view::live_symbols(s);
     let now = ui.input(|i| i.time);
     let look = Panel {
         margin: Margin::symmetric(9, 12),

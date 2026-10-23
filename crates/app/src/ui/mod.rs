@@ -21,7 +21,6 @@ use crate::capture::Status;
 use crate::engine::Handle;
 use crate::theme;
 // the cheat sheet reads the symbols heard so far through its old path until the guide lane switches to `bar`
-use bar::view as slots;
 
 pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     let ctx = ui.ctx().clone();
