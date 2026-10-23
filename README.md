@@ -7,9 +7,9 @@ beeps into digits, and shows each bunker's map grid and lock code on screen, wit
 It was made so that deaf and hard-of-hearing players can use the bunker broadcast. It also helps anyone who finds Morse
 by ear hard.
 
-![The window while a message is arriving](docs/images/receiving.png)
+![Test mode: a message arrives digit by digit, then the bunker's card appears](docs/images/demo.gif)
 
-*The first screenshot is test mode, which plays synthetic beeps. The second is a rendered test scene of a finished message with the hover card of one bunker open. No game audio is used or included in this repository.*
+*The animation is test mode, which plays synthetic beeps, shown at three times the speed. The screenshot further down is a rendered test scene of a finished message with the hover card of one bunker open. No game audio is used or included in this repository.*
 
 Unofficial fan project, not affiliated with Bohemia Interactive.
 

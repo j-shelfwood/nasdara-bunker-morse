@@ -2,6 +2,8 @@
 //! a display: `cargo run --release --example preview -- <out-dir> [--size WxH] <stream-second>...`.
 //! `--result ... --hover N` also renders the result with the hover card of bunker N (1..23) open.
 //! `--select N` (with `--result`) also renders the result with bunker N's roster tile clicked, so its card is open.
+//! `--film SECONDS [--fps N]` plays the demo for that long and writes `film/NNNN.png` frames (default 5 per second), for
+//! assembling the README animation with ffmpeg.
 //! `--menu` (with no stream seconds) also renders the options menu open.
 //! `--size 760x520` renders at another window size in points (default 1060x800); file names then carry the size.
 //! Set NASDARA_FONT_DIR to a folder with segoeui.ttf, segoeuib.ttf and bahnschrift.ttf to preview with the Windows fonts.
@@ -25,6 +27,7 @@ fn main() {
     // `--reduce-motion` sets the setting; `--twice` renders a second frame 0.3 s later and prints how many pixels moved
     let (mut reduce_motion, mut twice, mut menu) = (false, false, false);
     let (mut hover, mut select): (Option<usize>, Option<usize>) = (None, None);
+    let (mut film, mut fps): (Option<f64>, f64) = (None, 5.0);
     while let Some(a) = args.next() {
         if a == "--size" {
             let parsed = args.next().and_then(|v| {
@@ -44,6 +47,17 @@ fn main() {
                     .and_then(|v| v.parse().ok())
                     .expect("--hover needs a bunker number, e.g. 7"),
             );
+        } else if a == "--film" {
+            film = Some(
+                args.next()
+                    .and_then(|v| v.parse().ok())
+                    .expect("--film needs seconds, e.g. 100"),
+            );
+        } else if a == "--fps" {
+            fps = args
+                .next()
+                .and_then(|v| v.parse().ok())
+                .expect("--fps needs a number, e.g. 5");
         } else if a == "--select" {
             select = Some(
                 args.next()
@@ -65,7 +79,7 @@ fn main() {
 
     let engine = engine::start(Source::Game, egui::Context::default(), None);
     let settings = Settings {
-        onboarded: !marks.is_empty() || result.is_some(),
+        onboarded: !marks.is_empty() || result.is_some() || film.is_some(),
         reduce_motion,
         ..Settings::default()
     };
@@ -130,6 +144,24 @@ fn main() {
                 "pixels changed after 20 steps: {moved} in box ({x0},{y0})-({x1},{y1}) (reduce_motion={reduce_motion})"
             );
         }
+        return;
+    }
+    if let Some(seconds) = film {
+        let dir = out.join("film");
+        std::fs::create_dir_all(&dir).unwrap();
+        engine.send(Command::StartDemo);
+        let start = engine.lock().clock;
+        let mut n = 0;
+        while (n as f64) / fps < seconds {
+            let at = start + n as f64 / fps;
+            while engine.lock().clock < at {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            harness.run_steps(2);
+            save(&mut harness, &dir.join(format!("{n:04}.png")));
+            n += 1;
+        }
+        eprintln!("wrote {n} frames to {}", dir.display());
         return;
     }
     if marks.is_empty() {
