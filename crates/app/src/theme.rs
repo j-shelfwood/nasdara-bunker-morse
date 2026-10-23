@@ -18,6 +18,13 @@ pub const TEAL: Color32 = Color32::from_rgb(0x3d, 0xdb, 0xd9);
 pub const RED: Color32 = Color32::from_rgb(0xff, 0x6b, 0x57);
 pub const BLUE: Color32 = Color32::from_rgb(0x5a, 0xa9, 0xff);
 
+/// Diagonal corner cut of the HUD frames, in points.
+pub const CUT: f32 = 8.0;
+/// Width of every HUD line (frames, brackets, leaders).
+pub const HAIRLINE: f32 = 1.0;
+/// Length of one corner bracket arm.
+pub const BRACKET: f32 = 10.0;
+
 pub fn alpha(c: Color32, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (a.clamp(0.0, 1.0) * 255.0) as u8)
 }
@@ -50,11 +57,21 @@ fn font_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-fn load(file: &str) -> Option<Arc<FontData>> {
+/// Glyph shift in em, applied at raster time. egui centres text on the font's line box, not the glyph: Bahnschrift
+/// digits sit about 0.17 em too high and Segoe UI about 0.07 em too low (measured by `examples/centering_probe.rs`).
+const SEGOE_Y: f32 = -0.07;
+const BAHNSCHRIFT_Y: f32 = 0.17;
+
+fn load(file: &str, y_offset_factor: f32) -> Option<Arc<FontData>> {
     font_dirs()
         .iter()
         .find_map(|d| std::fs::read(d.join(file)).ok())
-        .map(|b| Arc::new(FontData::from_owned(b)))
+        .map(|b| {
+            Arc::new(FontData::from_owned(b).tweak(egui::FontTweak {
+                y_offset_factor,
+                ..Default::default()
+            }))
+        })
 }
 
 pub fn install(ctx: &egui::Context) {
@@ -70,10 +87,10 @@ pub fn install(ctx: &egui::Context) {
         .cloned()
         .unwrap_or_default();
 
-    let mut family = |name: &str, files: &[&str], fallback: &[String]| -> Vec<String> {
+    let mut family = |name: &str, files: &[&str], y: f32, fallback: &[String]| -> Vec<String> {
         let mut list = Vec::new();
         for file in files {
-            if let Some(data) = load(file) {
+            if let Some(data) = load(file, y) {
                 fonts.font_data.insert(format!("{name}:{file}"), data);
                 list.push(format!("{name}:{file}"));
             }
@@ -81,9 +98,19 @@ pub fn install(ctx: &egui::Context) {
         list.extend(fallback.iter().cloned());
         list
     };
-    let regular = family("regular", &["segoeui.ttf"], &fallback_prop);
-    let strong = family("bold", &["segoeuib.ttf", "segoeui.ttf"], &fallback_prop);
-    let figures = family("digits", &["bahnschrift.ttf"], &fallback_mono);
+    let regular = family("regular", &["segoeui.ttf"], SEGOE_Y, &fallback_prop);
+    let strong = family(
+        "bold",
+        &["segoeuib.ttf", "segoeui.ttf"],
+        SEGOE_Y,
+        &fallback_prop,
+    );
+    let figures = family(
+        "digits",
+        &["bahnschrift.ttf"],
+        BAHNSCHRIFT_Y,
+        &fallback_mono,
+    );
     fonts.families.insert(FontFamily::Proportional, regular);
     fonts
         .families
