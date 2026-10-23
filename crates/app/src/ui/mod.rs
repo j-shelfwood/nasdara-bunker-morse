@@ -72,8 +72,10 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     let mut s = engine.lock();
 
     // animation drives its own repaints; idle windows repaint a few times a second so clocks and ages stay current
-    if s.receiving() || s.status == Status::Listening {
+    if s.receiving() {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    } else if s.status == Status::Listening {
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
     } else {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }

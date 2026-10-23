@@ -12,6 +12,8 @@ struct Options {
     trace: bool,
     /// `--probe <seconds> <report file> [system]`: listen without a window and write what was heard, for testing capture.
     probe: Option<(u64, PathBuf, Source)>,
+    /// `--gpu-check <report file>`: list the graphics adapters the window could use, for diagnosing a window that will not open.
+    gpu_check: Option<PathBuf>,
 }
 
 fn options() -> Options {
@@ -19,12 +21,14 @@ fn options() -> Options {
         log: None,
         trace: false,
         probe: None,
+        gpu_check: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--log" => o.log = args.next().map(PathBuf::from),
             "--trace" => o.trace = true,
+            "--gpu-check" => o.gpu_check = args.next().map(PathBuf::from),
             "--probe" => {
                 let seconds = args.next().and_then(|v| v.parse().ok()).unwrap_or(10);
                 let report = args
@@ -46,6 +50,10 @@ fn options() -> Options {
 
 pub fn run() -> eframe::Result {
     let opts = options();
+    if let Some(report) = &opts.gpu_check {
+        gpu_check(report);
+        return Ok(());
+    }
     if let Some((seconds, report, source)) = &opts.probe {
         probe(*seconds, report, *source);
         return Ok(());
@@ -56,9 +64,13 @@ pub fn run() -> eframe::Result {
         height: 64,
     };
     lower_priority();
-    // a gaming laptop has two GPUs: this window should run on the integrated one and leave the fast one to the game
+    // prefer the integrated GPU where there is one, and leave the fast one to the game; DX12 is the predictable choice on Windows
     let mut gpu = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
     gpu.power_preference = eframe::wgpu::PowerPreference::LowPower;
+    #[cfg(windows)]
+    {
+        gpu.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+    }
     let native = eframe::NativeOptions {
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(gpu),
@@ -179,4 +191,16 @@ fn probe(seconds: u64, report: &PathBuf, source: Source) {
             let _ = writeln!(f, "status {s}");
         }
     }
+}
+
+fn gpu_check(report: &PathBuf) {
+    let instance =
+        eframe::wgpu::Instance::new(eframe::wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapters = pollster::block_on(instance.enumerate_adapters(eframe::wgpu::Backends::all()));
+    let mut text = format!("{} adapter(s)\n", adapters.len());
+    for a in &adapters {
+        let i = a.get_info();
+        text += &format!("{:?} | {} | {:?}\n", i.backend, i.name, i.device_type);
+    }
+    let _ = std::fs::write(report, text);
 }

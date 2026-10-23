@@ -1154,6 +1154,7 @@ dependencies = [
  "image",
  "nasdara_decoder",
  "open",
+ "pollster",
  "serde",
  "serde_json",
  "wasapi",
