@@ -4,7 +4,7 @@ use egui::{Align, Align2, Layout, Pos2, RichText, Sense, Stroke, StrokeKind, Ui,
 use nasdara_decoder::bunkers::{MAP_SIZE, bunkers, is_izurvive_url};
 
 use super::UiState;
-use super::widgets::{ButtonKind, button, caption};
+use super::widgets::{ButtonKind, button, caption, paint_check, paint_question};
 use crate::engine::{Card, Shared};
 use crate::theme::{self, AMBER, DIM, FAINT, RED, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
@@ -83,6 +83,7 @@ fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
                 ui.set_width(CARD_W - 28.0);
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
                 ui.horizontal(|ui| {
+                    reading_mark(ui, reading(c));
                     match c.bunker {
                         Some(n) => caption(ui, &format!("Bunker {n}")),
                         None => caption(ui, "Unknown bunker"),
@@ -178,33 +179,88 @@ fn code_row(ui: &mut Ui, c: &Card) {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Reading {
+    /// Every digit read and the bunker heard at least twice.
+    Confirmed,
+    /// Heard once.
+    Once,
+    /// A lock code digit is still unreadable.
+    Unclear,
+}
+
+pub fn reading(c: &Card) -> Reading {
+    if c.unclear > 0 {
+        Reading::Unclear
+    } else if c.count >= 2 {
+        Reading::Confirmed
+    } else {
+        Reading::Once
+    }
+}
+
+fn reading_color(r: Reading) -> egui::Color32 {
+    match r {
+        Reading::Confirmed => TEAL,
+        Reading::Once => AMBER,
+        Reading::Unclear => RED,
+    }
+}
+
+/// The state of a card as a shape: a check in a ring, a `1x` badge or a `?` in a ring.
+fn reading_mark(ui: &mut Ui, r: Reading) {
+    let color = reading_color(r);
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+    let p = ui.painter();
+    match r {
+        Reading::Confirmed => {
+            p.circle_stroke(rect.center(), 9.0, Stroke::new(1.6, color));
+            paint_check(p, rect.center(), 8.0, color, 2.0);
+        }
+        Reading::Once => {
+            p.rect_stroke(rect, 6.0, Stroke::new(1.6, color), StrokeKind::Inside);
+            p.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "1×",
+                theme::bold(11.0),
+                color,
+            );
+        }
+        Reading::Unclear => paint_question(p, rect.center(), 20.0, color),
+    }
+}
+
 fn status_line(ui: &mut Ui, c: &Card) {
-    let (color, text) = if c.unclear > 0 {
-        let n = c.unclear;
-        (
-            RED,
+    let r = reading(c);
+    let text = match r {
+        Reading::Unclear => {
+            let n = c.unclear;
             format!(
                 "{n} digit{} unclear. Keep listening, the broadcast repeats.",
                 if n == 1 { "" } else { "s" }
-            ),
-        )
-    } else if c.count >= 2 {
-        (TEAL, format!("Confirmed over {} transmissions", c.count))
-    } else {
-        (
-            AMBER,
-            "Heard once. A second pass would confirm it.".to_string(),
-        )
+            )
+        }
+        Reading::Confirmed => format!("Read on {} transmissions", c.count),
+        Reading::Once => "Heard once. Check it against the next transmission.".to_string(),
     };
-    let color = if c.corrected && c.unclear == 0 && c.count < 2 {
-        AMBER
-    } else {
-        color
-    };
-    ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-        ui.painter().circle_filled(r.center(), 3.5, color);
-        ui.label(RichText::new(text).font(theme::text(12.5)).color(DIM));
+    status_row(ui, r, &text);
+    if c.corrected {
+        status_row(
+            ui,
+            Reading::Once,
+            "Grid adjusted to the nearest known bunker",
+        );
+    }
+}
+
+fn status_row(ui: &mut Ui, r: Reading, text: &str) {
+    let color = reading_color(r);
+    ui.horizontal_top(|ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 16.0), Sense::hover());
+        ui.painter()
+            .circle_filled(rect.center() + Vec2::new(0.0, 1.0), 3.5, color);
+        ui.add(egui::Label::new(RichText::new(text).font(theme::text(12.5)).color(DIM)).wrap());
     });
 }
 
@@ -267,16 +323,24 @@ pub fn map(ui: &mut Ui, st: &UiState, s: &Shared, side: f32) {
                         Stroke::new(1.2, alpha(AMBER, 0.6 * (1.0 - phase))),
                     );
                 }
-                p.circle_filled(pos, 6.5, alpha(AMBER, 0.18));
-                p.circle_filled(
-                    pos,
-                    4.2,
-                    if c.unclear > 0 {
-                        theme::mix(AMBER, RED, 0.5)
-                    } else {
-                        AMBER
-                    },
-                );
+                let r = reading(c);
+                let color = reading_color(r);
+                p.circle_filled(pos, 6.5, alpha(color, 0.18));
+                match r {
+                    // unclear: an open ring with a question mark, not a different shade
+                    Reading::Unclear => {
+                        p.circle_filled(pos, 6.0, theme::BG);
+                        p.circle_stroke(pos, 6.0, Stroke::new(1.8, color));
+                        p.text(pos, Align2::CENTER_CENTER, "?", theme::bold(9.0), color);
+                    }
+                    Reading::Once => {
+                        p.circle_filled(pos, 4.2, color);
+                    }
+                    Reading::Confirmed => {
+                        p.circle_filled(pos, 5.2, color);
+                        paint_check(&p, pos, 5.0, theme::BG, 1.4);
+                    }
+                }
             }
         }
         if hovered.is_some_and(|h| h.distance(pos) < 8.0) {

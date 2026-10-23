@@ -117,13 +117,21 @@ pub fn show(ui: &mut Ui, s: &Shared) {
         let y = mid + 24.0;
         let unreadable = ch == '?';
         let c = if unreadable { theme::RED } else { TEAL };
-        painter.line_segment(
-            [
-                Pos2::new(x0.max(rect.left() + 6.0), y),
-                Pos2::new(x1 - 4.0, y),
-            ],
-            Stroke::new(1.5, alpha(c, 0.45 * f)),
-        );
+        let bracket = [
+            Pos2::new(x0.max(rect.left() + 6.0), y),
+            Pos2::new(x1 - 4.0, y),
+        ];
+        if unreadable {
+            // an unreadable digit gets a dashed bracket, not only another colour
+            painter.add(Shape::dashed_line(
+                &bracket,
+                Stroke::new(1.5, alpha(c, 0.7 * f)),
+                4.0,
+                3.0,
+            ));
+        } else {
+            painter.line_segment(bracket, Stroke::new(1.5, alpha(c, 0.45 * f)));
+        }
         painter.text(
             Pos2::new((x0 + x1 - 4.0) / 2.0, y + 13.0),
             Align2::CENTER_CENTER,

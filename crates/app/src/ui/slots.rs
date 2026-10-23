@@ -161,7 +161,7 @@ pub fn show(ui: &mut Ui, st: &mut UiState, v: &View) {
     let block_gap = 44.0_f32;
     let fixed = gap * 7.0 + group_gap + block_gap;
     let w = ((avail - fixed) / 10.0).clamp(40.0, 66.0);
-    let h = (w * 1.28).round();
+    let h = (w * 1.28).round() + 16.0;
     let total = w * 10.0 + fixed;
     let label_h = 20.0;
 
@@ -270,31 +270,38 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
             if !unreadable {
                 paint_symbols(
                     painter,
-                    Pos2::new(rect.center().x, rect.bottom() - 19.0),
+                    Pos2::new(rect.center().x, rect.bottom() - 36.0),
                     pattern_of(ch),
                     0.85,
                     alpha(DIM, 0.8),
                 );
             }
             if phase == Phase::Final {
-                // confidence: how much of the expected beep pattern was heard
+                // confidence: how much of the expected beep pattern was heard, as a bar and a word
                 let bar = Rect::from_min_size(
-                    Pos2::new(rect.left() + 8.0, rect.bottom() - 8.0),
-                    Vec2::new(rect.width() - 16.0, 3.0),
+                    Pos2::new(rect.left() + 8.0, rect.bottom() - 25.0),
+                    Vec2::new(rect.width() - 16.0, 6.0),
                 );
-                painter.rect_filled(bar, 1.5, alpha(FAINT, 0.35));
+                painter.rect_filled(bar, 3.0, alpha(FAINT, 0.35));
                 let share = slot.support.clamp(0.0, 1.0);
-                let c = if share >= 0.7 {
-                    TEAL
+                let (c, word) = if share >= 0.7 {
+                    (TEAL, "strong")
                 } else if share >= 0.45 {
-                    AMBER
+                    (AMBER, "ok")
                 } else {
-                    RED
+                    (RED, "weak")
                 };
                 painter.rect_filled(
-                    Rect::from_min_size(bar.min, Vec2::new(bar.width() * share, 3.0)),
-                    1.5,
+                    Rect::from_min_size(bar.min, Vec2::new(bar.width() * share, 6.0)),
+                    3.0,
                     c,
+                );
+                painter.text(
+                    Pos2::new(rect.center().x, rect.bottom() - 10.0),
+                    Align2::CENTER_CENTER,
+                    word,
+                    theme::text(11.0),
+                    DIM,
                 );
             }
         }
