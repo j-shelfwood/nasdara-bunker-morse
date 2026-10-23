@@ -10,7 +10,6 @@ mod win;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
@@ -69,9 +68,10 @@ impl Sink {
     }
 }
 
+/// Dropping a capture signals its thread to stop and does not wait for it: a thread stuck in a Windows call must
+/// not freeze the engine. Whatever it still sends is dropped by the engine, which has moved on to a newer generation.
 pub struct Capture {
     stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
 }
 
 impl Capture {
@@ -89,20 +89,16 @@ impl Capture {
     fn spawn(name: &str, run: impl FnOnce(Arc<AtomicBool>) + Send + 'static) -> Capture {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
-        let thread = std::thread::Builder::new()
+        let _ = std::thread::Builder::new()
             .name(name.into())
-            .spawn(move || run(flag))
-            .ok();
-        Capture { stop, thread }
+            .spawn(move || run(flag));
+        Capture { stop }
     }
 }
 
 impl Drop for Capture {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
     }
 }
 
@@ -116,4 +112,28 @@ fn live(_source: Source, sink: Sink, _stop: Arc<AtomicBool>) {
     sink.send(Event::Status(Status::Failed(
         "Live capture needs Windows. Use the demo.".into(),
     )));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn dropping_a_capture_does_not_wait_for_a_stuck_thread() {
+        let (release, parked) = mpsc::channel::<()>();
+        let (stopped_tx, stopped) = mpsc::channel();
+        let capture = Capture::spawn("stuck", move |stop| {
+            // a thread blocked in a call that never returns, until the test lets go
+            let _ = parked.recv();
+            let _ = stopped_tx.send(stop.load(Ordering::Relaxed));
+        });
+        let t = Instant::now();
+        drop(capture);
+        assert!(t.elapsed() < Duration::from_millis(500), "drop blocked");
+        // the detached thread still sees the stop flag when it wakes
+        release.send(()).unwrap();
+        assert_eq!(stopped.recv_timeout(Duration::from_secs(5)), Ok(true));
+    }
 }

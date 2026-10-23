@@ -47,7 +47,7 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
             },
             Source::System => None,
         };
-        match Session::open(target) {
+        match Session::open(target, &stop) {
             Ok(mut session) => {
                 say(Status::Listening);
                 let ended = session.pump(&tx, &stop, target);
@@ -79,17 +79,18 @@ struct Session {
 
 impl Session {
     /// A process id captures that process tree; none captures everything the default output plays.
-    fn open(pid: Option<u32>) -> Result<Session, String> {
+    fn open(pid: Option<u32>, stop: &AtomicBool) -> Result<Session, String> {
         let format = WaveFormat::new(16, 16, &SampleType::Int, SAMPLE_RATE, 2, None);
         let mode = StreamMode::EventsShared {
             autoconvert: true,
             buffer_duration_hns: 0,
         };
         let mut client = match pid {
-            Some(pid) => AudioClient::new_application_loopback_client(pid, true),
+            Some(pid) => activate_loopback(pid, stop),
             None => DeviceEnumerator::new()
                 .and_then(|e| e.get_default_device(&Direction::Render))
-                .and_then(|d| d.get_iaudioclient()),
+                .and_then(|d| d.get_iaudioclient())
+                .map_err(|e| e.to_string()),
         }
         .map_err(|e| format!("No audio device: {e}"))?;
         client
@@ -165,6 +166,46 @@ impl Session {
             }));
         }
     }
+}
+
+/// How long Windows may take to answer the per-process activation before the attempt is abandoned.
+const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The activated client crossing back from the helper thread.
+struct Activated(AudioClient);
+
+// SAFETY: both threads live in the multithreaded COM apartment, which has no thread affinity, and the client comes
+// out of ActivateAudioInterfaceAsync, whose result objects are free-threaded. It is used by one thread at a time.
+unsafe impl Send for Activated {}
+
+/// `AudioClient::new_application_loopback_client` waits on a condition variable without a timeout, so it runs on a
+/// helper thread. A call that never returns leaks that thread and nothing else; its late result is dropped.
+fn activate_loopback(pid: u32, stop: &AtomicBool) -> Result<AudioClient, String> {
+    let (done, result) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("activate".into())
+        .spawn(move || {
+            let client = if initialize_mta().is_err() {
+                Err("Windows audio could not be initialised".to_string())
+            } else {
+                AudioClient::new_application_loopback_client(pid, true)
+                    .map(Activated)
+                    .map_err(|e| e.to_string())
+            };
+            let _ = done.send(client);
+        });
+    if let Err(e) = spawned {
+        return Err(e.to_string());
+    }
+    let until = Instant::now() + ACTIVATION_TIMEOUT;
+    while Instant::now() < until && !stop.load(Ordering::Relaxed) {
+        match result.recv_timeout(Duration::from_millis(100)) {
+            Ok(client) => return client.map(|a| a.0),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    Err("Windows did not answer within 5 seconds".into())
 }
 
 fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) {
