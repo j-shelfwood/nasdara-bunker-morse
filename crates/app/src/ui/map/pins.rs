@@ -1,13 +1,11 @@
 //! The 23 pins: where they are, how they look, and what changed since the last frame.
 
-use std::time::Instant;
-
 use egui::{Align2, Context, Id, Painter, Pos2, Rect, Stroke, Vec2, vec2};
 
 use super::projection::Projection;
 use crate::engine::Card;
 use crate::theme::{self, AMBER, BG, RULE, TEXT, alpha};
-use crate::ui::anim::{Motion, easing};
+use crate::ui::anim::{Motion, easing, egui_time_of};
 use crate::ui::bunkers::{Reading, reading, reading_color};
 use crate::ui::widgets::paint_check;
 use nasdara_decoder::bunkers::{Bunker, bunkers};
@@ -45,21 +43,10 @@ pub(super) fn card_of(cards: &[Card], bunker: usize) -> Option<&Card> {
 const RING_EVERY: f64 = 1.2;
 const RINGS: f64 = 3.0;
 
-/// egui time at which this card was first seen new or changed, if that was recent enough to still announce.
-/// The wall clock of `Card.updated` is read once per change, never per frame.
+/// egui time of the card's last change while it is recent enough to still announce, else `None`.
 fn announced_at(ctx: &Context, c: &Card) -> Option<f64> {
-    let id = Id::unique(("map-seen", &c.key));
-    let now = ctx.input(|i| i.time);
-    let seen = ctx.data_mut(|d| d.get_temp::<(Instant, Option<f64>)>(id));
-    match seen {
-        Some((updated, at)) if updated == c.updated => at,
-        _ => {
-            let fresh = c.updated.elapsed().as_secs_f64() < RING_EVERY * RINGS;
-            let at = fresh.then_some(now);
-            ctx.data_mut(|d| d.insert_temp(id, (c.updated, at)));
-            at
-        }
-    }
+    let changed = egui_time_of(ctx, Id::unique(("map-seen", &c.key)), c.updated);
+    (ctx.input(|i| i.time) - changed < RING_EVERY * RINGS).then_some(changed)
 }
 
 pub(super) fn paint(

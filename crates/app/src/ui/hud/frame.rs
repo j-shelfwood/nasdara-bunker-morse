@@ -53,7 +53,6 @@ pub(crate) fn paint_focus(painter: &Painter, response: &egui::Response, cut: f32
     }
 }
 
-#[allow(dead_code)]
 /// Four corner brackets with arms of `len`.
 pub(crate) fn paint_brackets(painter: &Painter, rect: Rect, len: f32, stroke: Stroke) {
     for (corner, dx, dy) in [
@@ -73,7 +72,6 @@ pub(crate) fn paint_brackets(painter: &Painter, rect: Rect, len: f32, stroke: St
     }
 }
 
-#[allow(dead_code)]
 /// Thin line from `from` to `to` ending in a small diamond at `to`.
 pub(crate) fn paint_leader(painter: &Painter, from: Pos2, to: Pos2, stroke: Stroke) {
     painter.line_segment([from, to], stroke);

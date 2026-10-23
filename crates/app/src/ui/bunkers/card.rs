@@ -2,12 +2,13 @@ use egui::emath::easing::cubic_out;
 use egui::{Align, Align2, Id, Layout, RichText, Role, Sense, Stroke, Ui, Vec2, WidgetInfo};
 
 use super::CARD_W;
+use super::copied::{copied_recently, mark_copied};
 use super::reading::{Reading, reading, reading_color, reading_mark};
-use super::stamp::{changed_at, copied_recently, egui_time_of, first_seen, mark_copied};
 use crate::engine::Card;
 use crate::theme::{self, AMBER, DIM, RED, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 use crate::ui::UiState;
 use crate::ui::anim::Motion;
+use crate::ui::anim::{changed_at, egui_time_of, first_seen};
 use crate::ui::hud::{Panel, paint_frame, panel};
 use crate::ui::widgets::{ButtonKind, button, caption};
 use nasdara_decoder::bunkers::is_izurvive_url;

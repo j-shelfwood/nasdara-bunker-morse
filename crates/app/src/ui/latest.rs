@@ -8,7 +8,8 @@ use nasdara_decoder::bunkers::is_izurvive_url;
 
 use super::UiState;
 use super::anim::Motion;
-use super::bunkers::stamp::{copied_recently, egui_time_of, mark_copied};
+use super::anim::egui_time_of;
+use super::bunkers::copied::{copied_recently, mark_copied};
 use super::hud::{Panel, paint_frame, panel};
 use super::widgets::{ButtonKind, button, paint_check, paint_question};
 use crate::engine::{Card, Finished, Shared};

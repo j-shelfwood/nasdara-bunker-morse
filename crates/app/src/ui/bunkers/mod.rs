@@ -1,8 +1,8 @@
 //! One card per bunker heard, and a map of where they are.
 
 mod card;
+pub(super) mod copied;
 mod reading;
-pub(super) mod stamp;
 
 pub use reading::{Reading, reading, reading_color};
 
