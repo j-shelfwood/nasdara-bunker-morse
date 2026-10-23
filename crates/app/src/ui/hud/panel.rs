@@ -16,6 +16,8 @@ pub(crate) struct Panel {
     pub margin: Margin,
     /// Outer width; `None` takes all the width on offer.
     pub width: Option<f32>,
+    /// Outer height the frame keeps when the content is shorter.
+    pub min_height: Option<f32>,
 }
 
 impl Default for Panel {
@@ -26,6 +28,7 @@ impl Default for Panel {
             brackets: Some(alpha(AMBER, 0.75)),
             margin: Margin::same(12),
             width: None,
+            min_height: None,
         }
     }
 }
@@ -59,7 +62,7 @@ pub(crate) fn panel<R>(
     );
     child.set_width(inner.width());
     let value = add(&mut child);
-    let bottom = child.min_rect().bottom() + b;
+    let bottom = (child.min_rect().bottom() + b).max(outer.min.y + look.min_height.unwrap_or(0.0));
     let rect = Rect::from_min_max(outer.min, Pos2::new(right, bottom));
     let response = ui.allocate_rect(rect, Sense::hover());
     let painter = ui.painter();

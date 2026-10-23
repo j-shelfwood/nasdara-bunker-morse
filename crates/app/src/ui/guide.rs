@@ -12,9 +12,16 @@ use super::{UiState, bar};
 use crate::engine::Shared;
 use crate::theme::{self, AMBER, DIM, RULE, STROKE, SURFACE_HI, TEXT, mix};
 
-/// Five columns by two rows. The tile width follows the column (52 to 64 px), the height is fixed.
+/// Five columns by two rows. The tile size follows the room the column plan gives: width 40 to 84 px, height 34 to 64.
 const COLUMNS: usize = 5;
-const TILE_H: f32 = 58.0;
+const TILE_H_MIN: f32 = 34.0;
+const TILE_H_MAX: f32 = 64.0;
+/// Vertical margins of the panel, and the height of its caption row with the space under it.
+const MARGIN_Y: f32 = 12.0;
+const CAPTION_H: f32 = 18.0;
+/// The two explanatory notes take about this much; they are left out below `NOTES_FROM` points of panel height.
+const NOTES_H: f32 = 86.0;
+const NOTES_FROM: f32 = 230.0;
 /// Share of the tile height holding the digit; the Morse symbols sit in the rest.
 const DIGIT_ZONE: f32 = 0.62;
 const GAP: f32 = 3.0;
@@ -75,7 +82,7 @@ fn spoken(pattern: &str) -> String {
 
 /// Tile width for a row `avail` wide.
 fn tile_width(avail: f32) -> f32 {
-    ((avail - GAP * (COLUMNS - 1) as f32) / COLUMNS as f32).clamp(40.0, 64.0)
+    ((avail - GAP * (COLUMNS - 1) as f32) / COLUMNS as f32).clamp(40.0, 84.0)
 }
 
 /// Scale at which the widest pattern (five dashes) fits a tile of width `w` with a margin.
@@ -97,22 +104,35 @@ fn symbols_center(rect: Rect) -> egui::Pos2 {
     rest.center()
 }
 
-pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
+/// Tile height for a panel `height` tall, with or without the notes.
+fn tile_height(height: f32, notes: bool) -> f32 {
+    let rest = 2.0 * MARGIN_Y + CAPTION_H + GAP + if notes { NOTES_H } else { 0.0 };
+    ((height - rest) / 2.0).clamp(TILE_H_MIN, TILE_H_MAX)
+}
+
+/// The panel in `height` points: two rows of tiles that take what the caption and, in a tall panel, the two notes leave.
+pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared, height: f32) {
     let live = bar::view::live_symbols(s);
     let now = ui.input(|i| i.time);
     let look = Panel {
-        margin: Margin::symmetric(9, 12),
+        margin: Margin::symmetric(9, MARGIN_Y as i8),
         ..Panel::default()
     };
+    let notes = height >= NOTES_FROM;
+    let tile_h = tile_height(height, notes);
     panel(ui, look, |ui| {
+        // the spaces are explicit, so the panel is as tall as `tile_height` counted
+        ui.spacing_mut().item_spacing.y = 0.0;
         caption(ui, "Morse cheat sheet");
         ui.add_space(4.0);
-        note(
-            ui,
-            "Each digit is five beeps: short is a dot, long is a dash. Tap a digit to play it; digits that \
-             fit what you hear light up.",
-        );
-        ui.add_space(8.0);
+        if notes {
+            note(
+                ui,
+                "Each digit is five beeps: short is a dot, long is a dash. Tap a digit to play it; digits that \
+                 fit what you hear light up.",
+            );
+            ui.add_space(8.0);
+        }
         let w = tile_width(ui.available_width());
         let digits: Vec<char> = ORDER.chars().collect();
         ui.scope(|ui| {
@@ -120,16 +140,18 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
             for row in digits.chunks(COLUMNS) {
                 ui.horizontal(|ui| {
                     for &d in row {
-                        tile(ui, st, d, &live, now, Vec2::new(w, TILE_H));
+                        tile(ui, st, d, &live, now, Vec2::new(w, tile_h));
                     }
                 });
             }
         });
-        ui.add_space(6.0);
-        note(
-            ui,
-            "1 to 5: that many dots, then dashes. 6 to 9: dashes first, then dots. 0 is five dashes.",
-        );
+        if notes {
+            ui.add_space(6.0);
+            note(
+                ui,
+                "1 to 5: that many dots, then dashes. 6 to 9: dashes first, then dots. 0 is five dashes.",
+            );
+        }
     });
 }
 
@@ -255,7 +277,18 @@ mod tests {
         let w = tile_width(282.0);
         assert!((w - 54.0).abs() < 1e-4, "{w}");
         assert!(w * 5.0 + GAP * 4.0 <= 282.0 + 1e-3);
-        assert_eq!(tile_width(1000.0), 64.0);
+        assert_eq!(tile_width(1000.0), 84.0);
+    }
+
+    #[test]
+    fn the_tiles_follow_the_panel_height_within_their_range() {
+        use crate::ui::layout::{GUIDE_H_MAX, GUIDE_H_MIN};
+        assert!(tile_height(GUIDE_H_MIN, false) >= TILE_H_MIN);
+        assert!(tile_height(GUIDE_H_MAX, true) <= TILE_H_MAX);
+        assert!(tile_height(200.0, false) > tile_height(150.0, false));
+        assert_eq!(tile_height(1000.0, true), TILE_H_MAX);
+        // the notes appear before the panel is at its tallest
+        const { assert!(GUIDE_H_MAX >= NOTES_FROM) };
     }
 
     #[test]
@@ -270,7 +303,7 @@ mod tests {
 
     #[test]
     fn digit_and_symbols_split_the_tile_without_overlap() {
-        let rect = Rect::from_min_size(egui::pos2(10.0, 20.0), Vec2::new(54.0, TILE_H));
+        let rect = Rect::from_min_size(egui::pos2(10.0, 20.0), Vec2::new(54.0, TILE_H_MAX));
         let zone = digit_zone(rect);
         assert_eq!(zone.center().x, rect.center().x);
         assert!(zone.bottom() < symbols_center(rect).y);

@@ -83,6 +83,7 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) -> bool {
         fill: alpha(accent, 0.07 + 0.08 * arrival),
         stroke: Stroke::new(1.0 + 0.5 * arrival, alpha(accent, 0.55 + 0.45 * arrival)),
         margin: Margin::symmetric(16, 10),
+        min_height: Some(ui.available_height()),
         ..Panel::default()
     };
     let response = ui

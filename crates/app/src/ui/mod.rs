@@ -2,6 +2,7 @@ pub(crate) mod anim;
 mod bar;
 mod bunkers;
 mod chrome;
+mod column;
 mod guide;
 pub(crate) mod hud;
 mod latest;
@@ -45,7 +46,6 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     let root = ui.max_rect();
     let window = root.size();
     let regions = layout::regions(window, bands.header, bands.banners, bands.footer);
-    let wide = layout::is_wide(window.x);
 
     Panel::bottom("bar")
         .exact_size(regions.bar.height())
@@ -55,20 +55,14 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
                 .inner_margin(Margin::symmetric(12, 4)),
         )
         .show_separator_line(false)
-        .show(ui, |ui| bar::show(ui, st, &s, wide));
+        .show(ui, |ui| bar::show(ui, st, &s));
 
     CentralPanel::default()
         .frame(Frame::new().fill(theme::BG))
         .show(ui, |ui| {
             let centre = regions.centre.translated(root.min.to_vec2());
             map::show(ui, st, &s, centre.map);
-            match centre.column {
-                Some(column) => {
-                    st.drawer_open = false;
-                    chrome::column(ui, st, &s, column, window.y);
-                }
-                None => chrome::drawer(&ctx, st, &s, centre),
-            }
+            column::show(ui, st, &s, centre.column);
         });
 
     drop(s);

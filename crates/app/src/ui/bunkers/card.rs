@@ -1,7 +1,6 @@
 use egui::emath::easing::cubic_out;
 use egui::{Align, Align2, Id, Layout, RichText, Role, Sense, Stroke, Ui, Vec2, WidgetInfo};
 
-use super::CARD_W;
 use super::copied::{copied_recently, mark_copied};
 use super::reading::{Reading, reading, reading_color, reading_mark};
 use crate::engine::Card;
@@ -20,7 +19,7 @@ const COUNT_S: f32 = 0.5;
 /// Corner cut of one lock code cell.
 const CELL_CUT: f32 = 5.0;
 
-pub(super) fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
+pub(in crate::ui) fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
     let ctx = ui.ctx().clone();
     let still = st.settings.reduce_motion;
     let motion = Motion::new(still);
@@ -46,7 +45,7 @@ pub(super) fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
         fill: SURFACE_HI,
         stroke: Stroke::new(1.0 + fresh * 0.5, stroke),
         margin: egui::Margin::same(14),
-        width: Some(CARD_W),
+        min_height: Some(ui.available_height()),
         ..Panel::default()
     };
     let response = ui
@@ -106,7 +105,7 @@ fn card_body(ui: &mut Ui, st: &mut UiState, c: &Card, still: bool, flash: f32) {
 }
 
 /// What a screen reader says for a card.
-fn card_spoken(c: &Card, selected: bool) -> String {
+pub(super) fn card_spoken(c: &Card, selected: bool) -> String {
     let digits = |s: &str| {
         s.chars()
             .map(|ch| {
@@ -197,12 +196,12 @@ fn status_line(ui: &mut Ui, c: &Card) {
         Reading::Unclear => {
             let n = c.unclear;
             format!(
-                "{n} digit{} unclear. Keep listening, the broadcast repeats.",
+                "{n} digit{} unclear. Keep listening.",
                 if n == 1 { "" } else { "s" }
             )
         }
         Reading::Confirmed => format!("Read on {} transmissions", c.count),
-        Reading::Once => "Heard once. Check it against the next transmission.".to_string(),
+        Reading::Once => "Heard once. Check it on the next one.".to_string(),
     };
     status_row(ui, r, &text);
     if c.corrected {

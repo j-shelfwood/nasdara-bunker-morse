@@ -1,6 +1,5 @@
-//! The Morse ribbon: beeps appear at the right edge and slide left. In the full form the decoder's reading of each
-//! digit is bracketed underneath, and a beep it expected but did not hear is drawn as an empty outline. The one-line
-//! form keeps only the beeps and the ghosts.
+//! The Morse ribbon: beeps appear at the right edge and slide left. The decoder's reading of each digit is
+//! bracketed underneath, and a beep it expected but did not hear is drawn as an empty outline.
 
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2};
 use nasdara_decoder::grid::SHIPPED_TIMING;
@@ -82,15 +81,11 @@ fn readings(s: &Shared) -> Vec<(char, f64, f64)> {
     }
 }
 
-/// Paints the ribbon into `rect`. `full` adds the digit brackets and readouts and the caption.
-pub fn paint(painter: &egui::Painter, s: &Shared, rect: Rect, axis: Axis, full: bool, still: bool) {
+/// Paints the ribbon into `rect`.
+pub fn paint(painter: &egui::Painter, s: &Shared, rect: Rect, axis: Axis, still: bool) {
     let now = axis.now;
     let beep_h = (rect.height() * 0.18).clamp(7.0, 11.0);
-    let mid = if full {
-        rect.top() + rect.height() * 0.36
-    } else {
-        rect.center().y
-    };
+    let mid = rect.top() + rect.height() * 0.36;
     paint_frame(
         painter,
         rect,
@@ -130,9 +125,7 @@ pub fn paint(painter: &egui::Painter, s: &Shared, rect: Rect, axis: Axis, full: 
             continue;
         }
         let f = axis.fade(x0.max(x1.min(x0 + 1.0)));
-        if full {
-            paint_reading(painter, rect, ch, (x0, x1), f);
-        }
+        paint_reading(painter, rect, ch, (x0, x1), f);
         if ch != '?' {
             paint_ghosts(painter, s, ch, start, (mid, beep_h), axis, f);
         }
@@ -191,15 +184,13 @@ pub fn paint(painter: &egui::Painter, s: &Shared, rect: Rect, axis: Axis, full: 
         ],
         Stroke::new(1.5, alpha(AMBER, 0.55 * pulse)),
     );
-    if full {
-        painter.text(
-            Pos2::new(rect.left() + 10.0, rect.top() + 9.0),
-            Align2::LEFT_CENTER,
-            "MORSE",
-            theme::bold(11.0),
-            FAINT,
-        );
-    }
+    painter.text(
+        Pos2::new(rect.left() + 10.0, rect.top() + 9.0),
+        Align2::LEFT_CENTER,
+        "MORSE",
+        theme::bold(11.0),
+        FAINT,
+    );
 }
 
 /// Bracket under the digit's window with the digit centred beneath it.

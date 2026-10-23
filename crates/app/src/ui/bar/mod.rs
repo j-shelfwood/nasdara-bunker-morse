@@ -1,7 +1,6 @@
 //! The bottom bar: a label row, the Morse ribbon over the tone trace, and the ten digit slots.
 //!
-//! A wide window puts the ribbon and the trace on the left and the slots on the right. A narrow one stacks the slots
-//! over a one-line ribbon and drops the trace.
+//! The ribbon and the trace sit on the left, the slots on the right.
 
 mod digits;
 mod level;
@@ -19,10 +18,8 @@ use ribbon::Axis;
 const LABEL_H: f32 = 14.0;
 const LEFT_SHARE: f32 = 0.55;
 const GAP: f32 = 16.0;
-/// Height of the one-line ribbon of a narrow window.
-const LINE_H: f32 = 14.0;
 
-pub(super) fn show(ui: &mut Ui, st: &mut UiState, s: &Shared, wide: bool) {
+pub(super) fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) {
     let v = view::view(s);
     let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
     let painter = ui.painter_at(rect.expand(8.0));
@@ -41,28 +38,19 @@ pub(super) fn show(ui: &mut Ui, st: &mut UiState, s: &Shared, wide: bool) {
     let body = Rect::from_min_max(Pos2::new(inner.left(), label.bottom() + 1.0), inner.max);
 
     let still = st.settings.reduce_motion;
-    let axis_of = |r: Rect| Axis::new(r, s.now());
-    if wide {
-        let left = Rect::from_min_size(
-            body.min,
-            Vec2::new((body.width() * LEFT_SHARE).round(), body.height()),
-        );
-        let right = Rect::from_min_max(Pos2::new(left.right() + GAP, body.top()), body.max);
-        let ribbon_h = ((left.height() - 6.0) * 0.58).round();
-        let ribbon = Rect::from_min_size(left.min, Vec2::new(left.width(), ribbon_h));
-        let trace = Rect::from_min_max(Pos2::new(left.left(), ribbon.bottom() + 6.0), left.max);
-        let axis = axis_of(ribbon);
-        ribbon::paint(&painter, s, ribbon, axis, true, still);
-        level::paint(&painter, s, trace, axis);
-        describe_ribbon(ui, ribbon, &v);
-        digits::show(ui, st, &v, right);
-    } else {
-        let line = Rect::from_min_max(Pos2::new(body.left(), body.bottom() - LINE_H), body.max);
-        let slots = Rect::from_min_max(body.min, Pos2::new(body.right(), line.top() - 3.0));
-        digits::show(ui, st, &v, slots);
-        ribbon::paint(&painter, s, line, axis_of(line), false, still);
-        describe_ribbon(ui, line, &v);
-    }
+    let left = Rect::from_min_size(
+        body.min,
+        Vec2::new((body.width() * LEFT_SHARE).round(), body.height()),
+    );
+    let right = Rect::from_min_max(Pos2::new(left.right() + GAP, body.top()), body.max);
+    let ribbon_h = ((left.height() - 6.0) * 0.58).round();
+    let ribbon = Rect::from_min_size(left.min, Vec2::new(left.width(), ribbon_h));
+    let trace = Rect::from_min_max(Pos2::new(left.left(), ribbon.bottom() + 6.0), left.max);
+    let axis = Axis::new(ribbon, s.now());
+    ribbon::paint(&painter, s, ribbon, axis, still);
+    level::paint(&painter, s, trace, axis);
+    describe_ribbon(ui, ribbon, &v);
+    digits::show(ui, st, &v, right);
 }
 
 /// The small status line at the top of the bar; the hint sentence is its hover text.

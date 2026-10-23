@@ -10,7 +10,7 @@ use crate::capture::Source;
 use crate::engine::Shared;
 
 /// Smallest window the layout is built for, in points.
-pub const MIN_WINDOW: Vec2 = Vec2::new(760.0, 520.0);
+pub const MIN_WINDOW: Vec2 = Vec2::new(900.0, 700.0);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -81,8 +81,6 @@ pub struct UiState {
     pub(super) selected: Option<String>,
     /// The cheat sheet digit being played and when it started, in egui time.
     pub(super) guide_play: Option<(char, f64)>,
-    /// The bunkers drawer of a narrow window.
-    pub(super) drawer_open: bool,
     on_top_sent: Option<bool>,
     min_size_sent: bool,
     window_fitted: bool,
@@ -100,7 +98,6 @@ impl UiState {
             copied: None,
             selected: None,
             guide_play: None,
-            drawer_open: false,
             on_top_sent: None,
             min_size_sent: false,
             window_fitted: false,

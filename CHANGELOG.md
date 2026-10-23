@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The right column no longer scrolls. The latest result (or the card of the bunker you pick) sits at the top, all 23 bunkers are tiles below it in map order (number, lock code and how sure the reading is; click a heard one for its card, and the map marks it), and the Morse cheat sheet appears when the window is tall enough. The parts share the column's height and grow with the window.
+- Minimum window size is 900 x 700 (was 760 x 520), so the narrow layout with the bunkers drawer is gone.
 - Fewer unclear digits in game: the decoder now accepts a digit that follows its predecessor up to 0.4 s earlier than the nominal gap, which the live broadcast does now and then. Records that showed four or five `?` read in full.
 
 ## 0.2.0 (2026-10-23)

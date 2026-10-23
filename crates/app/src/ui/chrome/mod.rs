@@ -1,13 +1,10 @@
-//! Window chrome: the header, the banner strips under it, the footer, the options menu and the right column.
+//! Window chrome: the header, the banner strips under it, the footer and the options menu.
 
-mod drawer;
 mod footer;
 mod header;
 mod options;
 
 use egui::{Frame, Margin, Panel, Ui};
-
-pub use drawer::{column, drawer};
 
 use crate::engine::{Handle, Shared};
 use crate::theme;
