@@ -450,6 +450,7 @@ impl Engine {
             if b.records.is_empty() {
                 if let Some(note) = &b.note {
                     s.notes.push(Note::Info(format!("A transmission of {} beeps was heard but could not be read ({note}). It repeats, so keep listening.", b.elements)));
+                    trim_notes(&mut s.notes);
                 }
                 continue;
             }
@@ -486,10 +487,7 @@ impl Engine {
                 s.burst_beeps = 0;
                 fresh.push(e.key);
             }
-            if s.notes.len() > 4 {
-                let cut = s.notes.len() - 4;
-                s.notes.drain(..cut);
-            }
+            trim_notes(&mut s.notes);
         }
         s.changed.extend(fresh.iter().cloned());
         fresh
@@ -499,6 +497,15 @@ impl Engine {
         if !fresh.is_empty() {
             self.ctx.request_repaint();
         }
+    }
+}
+
+const MAX_NOTES: usize = 4;
+
+fn trim_notes(notes: &mut Vec<Note>) {
+    if notes.len() > MAX_NOTES {
+        let cut = notes.len() - MAX_NOTES;
+        notes.drain(..cut);
     }
 }
 
@@ -594,5 +601,16 @@ mod tests {
         let written = std::fs::read_to_string(&path).unwrap();
         let _ = std::fs::remove_file(&path);
         assert!(written.contains("\"elements\":12"), "{written}");
+    }
+
+    #[test]
+    fn notes_stay_trimmed_when_bursts_are_unreadable() {
+        let mut e = engine(0);
+        let shared = e.shared.clone();
+        let mut s = shared.lock().unwrap();
+        for _ in 0..50 {
+            e.digest(&mut s, vec![unreadable()], &mut Vec::new());
+        }
+        assert_eq!(s.notes.len(), MAX_NOTES);
     }
 }
