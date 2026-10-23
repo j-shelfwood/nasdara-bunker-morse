@@ -25,6 +25,8 @@ const PREVIEW_MIN_RUNS: usize = 6;
 /// Recompute the preview only after this many new frames.
 /// The decoder's jitter allowance: a digit counts as settled only when the trace extends this far past its window.
 const SETTLE_S: f64 = 0.12;
+/// A closed burst's preview is dropped after this long even if its burst never arrives.
+const PREVIEW_HOLD_S: f64 = 3.0;
 const PREVIEW_REFRESH_FRAMES: u64 = 60;
 /// The preview decodes at most this many seconds of the open burst (the newest): a message is about 90 s.
 const PREVIEW_MAX_S: f64 = 100.0;
@@ -73,6 +75,16 @@ struct OpenBurst {
     off_frames: usize,
 }
 
+/// An open burst that has just closed: its preview is still served until the burst itself is emitted.
+#[derive(Debug)]
+struct Closing {
+    open: OpenBurst,
+    frames_at_close: u64,
+    bursts_at_close: u64,
+    /// The burst has been emitted: the preview goes at the next push.
+    released: bool,
+}
+
 #[derive(Debug)]
 struct PreviewCache {
     id: u64,
@@ -95,6 +107,8 @@ pub struct Pipeline {
     /// Absolute frame number of `levels[0]`.
     levels_base: u64,
     open: Option<OpenBurst>,
+    closing: Option<Closing>,
+    bursts_emitted: u64,
     next_burst_id: u64,
     cache: Mutex<Option<PreviewCache>>,
 }
@@ -140,6 +154,8 @@ impl Pipeline {
             frames_total: 0,
             levels_base: 0,
             open: None,
+            closing: None,
+            bursts_emitted: 0,
             next_burst_id: 0,
             cache: Mutex::new(None),
         }
@@ -155,6 +171,9 @@ impl Pipeline {
     }
 
     pub fn push(&mut self, samples: &[i16]) -> PushResult {
+        if self.closing.as_ref().is_some_and(|c| c.released) {
+            self.closing = None;
+        }
         let frames = self.tone.push(samples);
         for f in &frames {
             let on = if self.live.on {
@@ -176,13 +195,27 @@ impl Pipeline {
             self.levels_base += cut as u64;
         }
         let runs = self.runs.push(&frames);
-        let bursts = self
+        let bursts: Vec<Burst> = self
             .bursts
             .push(&runs)
             .into_iter()
             .map(|b| self.decode(b))
             .collect();
+        self.bursts_emitted += bursts.len() as u64;
+        let hold = (PREVIEW_HOLD_S / FRAME_SECONDS).ceil() as u64;
+        if let Some(c) = &mut self.closing {
+            c.released |= self.bursts_emitted > c.bursts_at_close;
+            if self.frames_total - c.frames_at_close > hold {
+                self.closing = None;
+            }
+        }
         PushResult { frames, bursts }
+    }
+
+    /// Back to the state of `Pipeline::with_options` with the same options: a fresh detector, levels, runs and
+    /// assembler, so a capture can restart without constructing a new pipeline.
+    pub fn reset(&mut self) {
+        *self = Self::with_options(self.opts);
     }
 
     pub fn flush(&mut self) -> Vec<Burst> {
@@ -190,6 +223,7 @@ impl Pipeline {
         let mut bursts = self.bursts.push(&runs);
         bursts.extend(self.bursts.flush());
         self.open = None;
+        self.closing = None;
         bursts.into_iter().map(|b| self.decode(b)).collect()
     }
 
@@ -202,6 +236,7 @@ impl Pipeline {
         if self.live_run >= min_on_frames {
             let run_start = self.frames_total + 1 - self.live_run as u64;
             let open = self.open.get_or_insert_with(|| {
+                self.closing = None;
                 self.next_burst_id += 1;
                 OpenBurst {
                     id: self.next_burst_id,
@@ -217,17 +252,24 @@ impl Pipeline {
         } else if let Some(open) = &mut self.open {
             open.off_frames += 1;
             if open.off_frames >= quiet_frames {
-                self.open = None;
+                self.closing = self.open.take().map(|open| Closing {
+                    open,
+                    frames_at_close: self.frames_total,
+                    bursts_at_close: self.bursts_emitted,
+                    released: false,
+                });
             }
         }
     }
 
     /// Digits read from the transmission in progress so far. `None` outside a transmission or before it has
-    /// `PREVIEW_MIN_RUNS` tone runs. Cached: recomputed after `PREVIEW_REFRESH_FRAMES` new frames.
+    /// `PREVIEW_MIN_RUNS` tone runs. After the transmission closes the last preview is kept until the push after
+    /// its `Burst` was emitted. Cached: recomputed after `PREVIEW_REFRESH_FRAMES` new frames.
     pub fn preview(&self) -> Option<Preview> {
         let open = self
             .open
             .as_ref()
+            .or(self.closing.as_ref().map(|c| &c.open))
             .filter(|o| o.on_runs >= PREVIEW_MIN_RUNS)?;
         let mut cache = unpoison(&self.cache);
         if let Some(c) = cache.as_ref()
