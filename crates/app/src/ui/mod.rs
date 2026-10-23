@@ -1,9 +1,11 @@
 mod cards;
+mod latest;
 mod onboarding;
 mod signal;
 mod slots;
 mod widgets;
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use egui::{
@@ -14,8 +16,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::capture::{Source, Status};
 use crate::engine::{Command, Handle, Mode, Note, Shared};
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, RED, STROKE, SURFACE, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RED, RULE, STROKE, SURFACE, TEAL, alpha};
 use widgets::{ButtonKind, Pill, button, caption, card, pill, segmented};
+
+/// Smallest window the layout is built for, in points.
+pub const MIN_WINDOW: Vec2 = Vec2::new(760.0, 520.0);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -25,6 +30,8 @@ pub struct Settings {
     pub always_on_top: bool,
     pub flash_taskbar: bool,
     pub open_map_for_new: bool,
+    /// No pulses, glows, blinking cursor or pop animations, and no fast repaint for them.
+    pub reduce_motion: bool,
 }
 
 impl Default for Settings {
@@ -35,6 +42,7 @@ impl Default for Settings {
             always_on_top: false,
             flash_taskbar: true,
             open_map_for_new: false,
+            reduce_motion: false,
         }
     }
 }
@@ -42,10 +50,14 @@ impl Default for Settings {
 pub struct UiState {
     pub settings: Settings,
     pub onboarding: Option<usize>,
-    slot_seen: [(Option<char>, f64); 10],
+    slot_seen: [slots::SlotSeen; 10],
+    /// Grid and lock code last seen per card key, so only a new or changed card raises attention.
+    card_seen: HashMap<String, (String, String)>,
     copied: Option<(String, Instant)>,
     selected: Option<String>,
     on_top_sent: Option<bool>,
+    min_size_sent: bool,
+    window_fitted: bool,
     modal_ids: (egui::Id, egui::Id),
 }
 
@@ -55,10 +67,13 @@ impl UiState {
         UiState {
             settings,
             onboarding,
-            slot_seen: [(None, 0.0); 10],
+            slot_seen: [slots::SlotSeen::default(); 10],
+            card_seen: HashMap::new(),
             copied: None,
             selected: None,
             on_top_sent: None,
+            min_size_sent: false,
+            window_fitted: false,
             modal_ids: (
                 egui::Id::unique("onboarding-backdrop"),
                 egui::Id::unique("onboarding"),
@@ -74,12 +89,11 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     // animation drives its own repaints; idle windows repaint a few times a second so clocks and ages stay current
     if s.receiving() {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
-    } else if s.status == Status::Listening {
-        ctx.request_repaint_after(std::time::Duration::from_millis(33));
     } else {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 
+    size_window(&ctx, st);
     react_to_new_bunkers(&ctx, st, &mut s);
     let on_top = st.settings.always_on_top;
     if st.on_top_sent != Some(on_top) {
@@ -130,7 +144,7 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     drop(s);
     if let Some(page) = st.onboarding {
         let mut page = page;
-        match onboarding::show(&ctx, &st.modal_ids, &mut page) {
+        match onboarding::show(&ctx, &st.modal_ids, &mut page, st.settings.reduce_motion) {
             onboarding::Outcome::Open => st.onboarding = Some(page),
             onboarding::Outcome::Close => finish_onboarding(st),
             onboarding::Outcome::Demo => {
@@ -141,25 +155,60 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
     }
 }
 
+/// The window opens at 1060x800 points whatever the monitor. On the first frame that knows the monitor size it is
+/// cut down to 90% of the monitor, and the minimum size drops so a short window still shows the result.
+fn size_window(ctx: &egui::Context, st: &mut UiState) {
+    const OPEN: Vec2 = Vec2::new(1060.0, 800.0);
+    if !st.min_size_sent {
+        st.min_size_sent = true;
+        ctx.send_viewport_cmd(ViewportCommand::MinInnerSize(MIN_WINDOW));
+    }
+    if st.window_fitted {
+        return;
+    }
+    let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) else {
+        return;
+    };
+    st.window_fitted = true;
+    let current = ctx
+        .input(|i| i.viewport().inner_rect)
+        .map_or(OPEN, |r| r.size());
+    let limit = (monitor * 0.9).max(MIN_WINDOW);
+    if current.x > limit.x || current.y > limit.y {
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(current.min(limit)));
+    }
+}
+
 fn finish_onboarding(st: &mut UiState) {
     st.onboarding = None;
     st.settings.onboarded = true;
 }
 
-fn react_to_new_bunkers(ctx: &egui::Context, st: &UiState, s: &mut Shared) {
+fn react_to_new_bunkers(ctx: &egui::Context, st: &mut UiState, s: &mut Shared) {
+    st.card_seen
+        .retain(|key, _| s.cards.iter().any(|c| &c.key == key));
     for key in std::mem::take(&mut s.changed) {
-        if st.settings.flash_taskbar {
-            ctx.send_viewport_cmd(ViewportCommand::RequestUserAttention(
-                UserAttentionType::Informational,
-            ));
+        let Some(card) = s.cards.iter().find(|c| c.key == key) else {
+            continue;
+        };
+        let now = (card.grid.clone(), card.code.clone());
+        let previous = st.card_seen.insert(key, now.clone());
+        let is_new = previous.is_none();
+        if !is_new && previous.as_ref() == Some(&now) {
+            continue;
         }
-        let url = s
-            .cards
-            .iter()
-            .find(|c| c.key == key && c.count == 1)
-            .and_then(|c| c.url.clone());
-        if let (true, Some(url)) = (st.settings.open_map_for_new, url)
-            && nasdara_decoder::bunkers::is_izurvive_url(&url)
+        if st.settings.flash_taskbar {
+            ctx.send_viewport_cmd(ViewportCommand::RequestUserAttention(if is_new {
+                UserAttentionType::Critical
+            } else {
+                UserAttentionType::Informational
+            }));
+        }
+        if let (true, true, Some(url)) = (
+            st.settings.open_map_for_new,
+            card.count == 1,
+            card.url.as_deref(),
+        ) && nasdara_decoder::bunkers::is_izurvive_url(url)
         {
             let _ = open::that(url);
         }
@@ -181,11 +230,16 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
         });
         ui.add_space(18.0);
         let (label, dot, pulse) = status_chip(s, ui.input(|i| i.time) as f32);
+        let pulse = if st.settings.reduce_motion {
+            0.0
+        } else {
+            pulse
+        };
         pill(ui, &Pill { dot, pulse, label });
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let help = widgets::icon_button(ui, false, "How it works", |p, r, c| {
+            let help = widgets::icon_button(ui, None, "How it works", |p, r, c| {
                 p.circle_stroke(r.center(), r.width() / 2.0, Stroke::new(1.5, c));
                 p.text(
                     r.center(),
@@ -200,7 +254,7 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
             }
             let pin = widgets::icon_button(
                 ui,
-                st.settings.always_on_top,
+                Some(st.settings.always_on_top),
                 "Keep this window above the game",
                 |p, r, c| {
                     p.circle_filled(r.center() - Vec2::new(0.0, 2.0), 3.6, c);
@@ -216,7 +270,7 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
             if pin.clicked() {
                 st.settings.always_on_top = !st.settings.always_on_top;
             }
-            let gear = widgets::icon_button(ui, false, "Options", |p, r, c| {
+            let gear = widgets::icon_button(ui, None, "Options", |p, r, c| {
                 for k in 0..3 {
                     let y = r.top() + 2.0 + k as f32 * (r.height() - 4.0) / 2.0;
                     p.line_segment(
@@ -234,6 +288,10 @@ fn header(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
                 ui.checkbox(
                     &mut st.settings.open_map_for_new,
                     "Open the map for each new bunker",
+                );
+                ui.checkbox(
+                    &mut st.settings.reduce_motion,
+                    "Reduce motion (no pulses, glows or blinking)",
                 );
                 ui.separator();
                 if ui.button("Forget the bunkers heard so far").clicked() {
@@ -269,8 +327,9 @@ fn status_chip(s: &Shared, time: f32) -> (String, egui::Color32, f32) {
             } else {
                 "Listening to system audio".into()
             },
-            GREEN,
-            breathe(0.5),
+            TEAL,
+            // an idle window repaints a few times a second, too slowly for a smooth breathing dot
+            0.0,
         ),
         Status::WaitingForGame => ("Waiting for DayZ".into(), FAINT, 0.0),
         Status::Failed(_) => ("Cannot listen".into(), RED, 0.0),
@@ -303,16 +362,16 @@ fn banner(ui: &mut Ui, engine: &Handle, s: &Shared) {
             .corner_radius(10.0)
             .inner_margin(egui::Margin::symmetric(14, 9))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                // the label wraps and the button drops to the next line when the row is full
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(text)
                             .font(theme::text(13.0))
                             .color(theme::TEXT),
                     );
                     if let Some(a) = action {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            act = button(ui, a, ButtonKind::Quiet).clicked()
-                        });
+                        act = button(ui, a, ButtonKind::Quiet).clicked();
                     }
                 });
             });
@@ -323,17 +382,31 @@ fn banner(ui: &mut Ui, engine: &Handle, s: &Shared) {
 }
 
 fn live_card(ui: &mut Ui, st: &mut UiState, s: &Shared) {
+    let size = signal::Size::for_window_height(ui.ctx().content_rect().height());
     card(ui, |ui| {
         ui.set_width(ui.available_width());
         let v = slots::view(s);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&v.headline).font(theme::bold(15.0)));
-        });
-        ui.label(RichText::new(&v.hint).font(theme::text(12.5)).color(DIM));
-        ui.add_space(4.0);
-        slots::show(ui, st, &v);
-        ui.add_space(6.0);
-        signal::show(ui, s);
+        let strip = latest::show(ui, st, s);
+        let compact = size.is_compact();
+        // a short window with a result on screen gives its height to the cards: the strip holds the digits,
+        // and the idle ribbon and the headline wait until the window grows or the next transmission starts
+        let squeezed = compact && strip;
+        if !squeezed {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&v.headline).font(theme::bold(20.0)));
+            });
+        }
+        if !compact {
+            ui.add(
+                egui::Label::new(RichText::new(&v.hint).font(theme::text(12.5)).color(DIM)).wrap(),
+            );
+            ui.add_space(4.0);
+        }
+        if !squeezed {
+            slots::show(ui, st, &v);
+            ui.add_space(6.0);
+            signal::show(ui, s, size, st.settings.reduce_motion);
+        }
     });
 }
 
@@ -381,7 +454,7 @@ fn footer(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, Vec2::new(rect.width() * level, rect.height())),
             4.0,
-            if level > 0.02 { GREEN } else { FAINT },
+            if level > 0.02 { TEAL } else { RULE },
         );
         ui.label(
             RichText::new("Audio level")

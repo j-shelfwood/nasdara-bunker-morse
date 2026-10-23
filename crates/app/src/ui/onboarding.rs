@@ -3,7 +3,7 @@
 use egui::{Align2, Area, Color32, Order, Pos2, Rect, RichText, Sense, Stroke, Ui, Vec2};
 
 use super::widgets::{ButtonKind, button, paint_symbols};
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, STROKE, SURFACE, SURFACE_HI, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RULE, STROKE, SURFACE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const PAGES: usize = 3;
 
@@ -13,9 +13,31 @@ pub enum Outcome {
     Demo,
 }
 
-pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -> Outcome {
+pub fn show(
+    ctx: &egui::Context,
+    ids: &(egui::Id, egui::Id),
+    page: &mut usize,
+    still: bool,
+) -> Outcome {
     let screen = ctx.content_rect();
     let mut outcome = Outcome::Open;
+    let last = *page + 1 == PAGES;
+    // arrow keys turn the pages; consumed first so they do not also move the keyboard focus
+    let (left, right) = ctx.input_mut(|i| {
+        (
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+        )
+    });
+    if right && !last {
+        *page += 1;
+    }
+    if left && *page > 0 {
+        *page -= 1;
+    }
+    let shown_page = ctx.data(|d| d.get_temp::<usize>(ids.1));
+    let refocus = shown_page != Some(*page) || ctx.memory(|m| m.focused().is_none());
+    ctx.data_mut(|d| d.insert_temp(ids.1, *page));
 
     Area::new(ids.0)
         .order(Order::Foreground)
@@ -43,7 +65,7 @@ pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -
                 .show(ui, |ui| {
                     ui.set_min_size(size);
                     ui.set_max_size(size);
-                    illustration(ui, *page, size.x);
+                    illustration(ui, *page, size.x, still);
                     ui.add_space(8.0);
                     egui::Frame::new()
                         .inner_margin(egui::Margin::symmetric(32, 0))
@@ -62,13 +84,16 @@ pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         if *page + 1 < PAGES {
-                                            if button(ui, "Next", ButtonKind::Primary).clicked() {
+                                            let next = button(ui, "Next", ButtonKind::Primary);
+                                            primary_focus(ui.ctx(), &next, refocus);
+                                            if next.clicked() {
                                                 *page += 1;
                                             }
                                         } else {
-                                            if button(ui, "Start listening", ButtonKind::Primary)
-                                                .clicked()
-                                            {
+                                            let start =
+                                                button(ui, "Start listening", ButtonKind::Primary);
+                                            primary_focus(ui.ctx(), &start, refocus);
+                                            if start.clicked() {
                                                 outcome = Outcome::Close;
                                             }
                                             if button(ui, "Try the demo", ButtonKind::Quiet)
@@ -95,6 +120,22 @@ pub fn show(ctx: &egui::Context, ids: &(egui::Id, egui::Id), page: &mut usize) -
     outcome
 }
 
+/// The primary button holds the focus on each page, and keeps the left and right arrows for page turning.
+fn primary_focus(ctx: &egui::Context, response: &egui::Response, refocus: bool) {
+    if refocus {
+        response.request_focus();
+    }
+    ctx.memory_mut(|m| {
+        m.set_focus_lock_filter(
+            response.id,
+            egui::EventFilter {
+                horizontal_arrows: true,
+                ..Default::default()
+            },
+        )
+    });
+}
+
 fn dots(ui: &mut Ui, page: usize) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(PAGES as f32 * 18.0, 32.0), Sense::hover());
     for i in 0..PAGES {
@@ -103,7 +144,7 @@ fn dots(ui: &mut Ui, page: usize) {
             ui.painter()
                 .rect_filled(Rect::from_center_size(c, Vec2::new(16.0, 6.0)), 3.0, AMBER);
         } else {
-            ui.painter().circle_filled(c, 3.0, FAINT);
+            ui.painter().circle_filled(c, 3.0, RULE);
         }
     }
 }
@@ -143,7 +184,7 @@ fn body(ui: &mut Ui, page: usize) {
 }
 
 /// A looping picture for each page, painted from the same shapes the live ribbon uses.
-fn illustration(ui: &mut Ui, page: usize, width: f32) {
+fn illustration(ui: &mut Ui, page: usize, width: f32, still: bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 150.0), Sense::hover());
     let p = ui.painter_at(rect);
     p.rect_filled(
@@ -156,8 +197,15 @@ fn illustration(ui: &mut Ui, page: usize, width: f32) {
         },
         theme::BG,
     );
-    let t = ui.input(|i| i.time) as f32;
-    ui.ctx().request_repaint();
+    // a still picture holds the frame where the pictures read best
+    let t = if still {
+        1.2
+    } else {
+        ui.input(|i| i.time) as f32
+    };
+    if !still {
+        ui.ctx().request_repaint();
+    }
     match page {
         0 => morse_loop(&p, rect, t),
         1 => radio_scene(&p, rect, t),
@@ -207,12 +255,12 @@ fn radio_scene(p: &egui::Painter, rect: Rect, t: f32) {
     p.circle_stroke(
         body.center() - Vec2::new(14.0, 0.0),
         10.0,
-        Stroke::new(1.2, FAINT),
+        Stroke::new(1.2, RULE),
     );
     p.rect_filled(
         Rect::from_center_size(body.center() + Vec2::new(16.0, -8.0), Vec2::new(18.0, 6.0)),
         2.0,
-        alpha(GREEN, 0.5 + 0.4 * (t * 2.0).sin().abs()),
+        alpha(TEAL, 0.5 + 0.4 * (t * 2.0).sin().abs()),
     );
     // waves from a bunker on the right travelling to the radio
     let origin = Pos2::new(rect.center().x + 150.0, rect.center().y + 10.0);
@@ -224,14 +272,14 @@ fn radio_scene(p: &egui::Painter, rect: Rect, t: f32) {
     p.rect_stroke(
         Rect::from_center_size(origin + Vec2::new(0.0, 8.0), Vec2::new(44.0, 26.0)),
         4.0,
-        Stroke::new(1.5, FAINT),
+        Stroke::new(1.5, RULE),
         egui::StrokeKind::Inside,
     );
     p.text(
         origin + Vec2::new(0.0, -18.0),
         Align2::CENTER_CENTER,
         "bunker",
-        theme::text(11.0),
+        theme::text(12.0),
         FAINT,
     );
     for k in 0..4 {
@@ -255,7 +303,7 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
     p.rect_stroke(
         boxr,
         12.0,
-        Stroke::new(1.5, alpha(GREEN, 0.6)),
+        Stroke::new(1.5, alpha(TEAL, 0.6)),
         egui::StrokeKind::Inside,
     );
     p.text(c, Align2::CENTER_CENTER, "your PC", theme::bold(15.0), TEXT);
@@ -272,7 +320,7 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
         Pos2::new(boxr.left() - 70.0, c.y - 28.0),
         Align2::CENTER_CENTER,
         "game audio",
-        theme::text(11.5),
+        theme::text(12.0),
         FAINT,
     );
     p.line_segment(
@@ -280,13 +328,13 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
             boxr.right_center() + Vec2::new(14.0, 0.0),
             boxr.right_center() + Vec2::new(70.0, 0.0),
         ],
-        Stroke::new(1.5, alpha(FAINT, 0.6)),
+        Stroke::new(1.5, alpha(RULE, 0.9)),
     );
     p.text(
         boxr.right_center() + Vec2::new(44.0, -16.0),
         Align2::CENTER_CENTER,
         "no network",
-        theme::text(11.5),
+        theme::text(12.0),
         FAINT,
     );
     p.line_segment(
@@ -303,4 +351,54 @@ fn shield(p: &egui::Painter, rect: Rect, t: f32) {
         ],
         Stroke::new(2.0, theme::RED),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui_kittest::Harness;
+
+    fn harness() -> Harness<'static, usize> {
+        let ids = (egui::Id::unique("backdrop"), egui::Id::unique("modal"));
+        Harness::builder()
+            .with_context_setup(theme::install)
+            .build_ui_state(
+                move |ui, page: &mut usize| {
+                    let _ = show(ui.ctx(), &ids, page, false);
+                },
+                0usize,
+            )
+    }
+
+    #[test]
+    fn arrow_keys_turn_pages_and_stop_at_the_ends() {
+        let mut h = harness();
+        h.run_steps(4);
+        h.key_press(egui::Key::ArrowLeft);
+        h.run_steps(4);
+        assert_eq!(*h.state(), 0, "left on the first page stays");
+        h.key_press(egui::Key::ArrowRight);
+        h.run_steps(4);
+        h.key_press(egui::Key::ArrowRight);
+        h.run_steps(4);
+        h.key_press(egui::Key::ArrowRight);
+        h.run_steps(4);
+        assert_eq!(*h.state(), PAGES - 1, "right stops on the last page");
+        h.key_press(egui::Key::ArrowLeft);
+        h.run_steps(4);
+        assert_eq!(*h.state(), PAGES - 2);
+    }
+
+    #[test]
+    fn enter_presses_the_focused_primary_button() {
+        let mut h = harness();
+        h.run_steps(4);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(4);
+        assert_eq!(
+            *h.state(),
+            1,
+            "Enter on the initially focused Next advances"
+        );
+    }
 }

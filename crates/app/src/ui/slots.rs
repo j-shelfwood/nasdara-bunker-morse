@@ -7,7 +7,7 @@ use nasdara_decoder::morse::pattern_of;
 use super::UiState;
 use super::widgets::{paint_caption, paint_symbols, symbols_width};
 use crate::engine::Shared;
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, RED, STROKE, SURFACE_HI, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, RED, RULE, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const DIGITS: usize = 10;
 /// Length above which a tone counts as a dash (dots are ~0.09 s, dashes ~0.48 s).
@@ -154,19 +154,24 @@ fn ago_text(secs: u64) -> String {
 }
 
 pub fn show(ui: &mut Ui, st: &mut UiState, v: &View) {
-    let time = ui.input(|i| i.time) as f32;
+    // time 0 freezes every sine and blink at its steady, visible state
+    let time = if st.settings.reduce_motion {
+        0.0
+    } else {
+        ui.input(|i| i.time) as f32
+    };
     let avail = ui.available_width();
     let gap = 8.0_f32;
     let group_gap = 16.0_f32;
     let block_gap = 44.0_f32;
     let fixed = gap * 7.0 + group_gap + block_gap;
     let w = ((avail - fixed) / 10.0).clamp(40.0, 66.0);
-    let h = (w * 1.28).round();
+    let h = (w * 1.28).round() + 16.0;
     let total = w * 10.0 + fixed;
     let label_h = 20.0;
 
     let (area, _) = ui.allocate_exact_size(Vec2::new(avail, h + label_h), Sense::hover());
-    let painter = ui.painter_at(area);
+    let painter = ui.painter().with_clip_rect(area.expand(20.0));
     let left = area.center().x - total / 2.0;
     let top = area.top() + label_h;
 
@@ -207,12 +212,19 @@ pub fn show(ui: &mut Ui, st: &mut UiState, v: &View) {
 
     for (i, slot) in v.slots.iter().enumerate() {
         let rect = Rect::from_min_size(Pos2::new(xs[i], top), Vec2::new(w, h));
-        let pop = st.pop(i, slot.ch, ui.input(|i| i.time));
+        let mut pop = st.pop(i, slot.ch, slot.phase == Phase::Final, ui.input(|i| i.time));
+        if st.settings.reduce_motion {
+            pop = Pop::default();
+        }
+        if pop.pop > 0.0 || pop.ring > 0.0 {
+            ui.ctx().request_repaint();
+        }
         paint_slot(&painter, rect, slot, &v.live_symbols, time, pop);
     }
 }
 
-fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time: f32, pop: f32) {
+fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time: f32, anim: Pop) {
+    let pop = anim.pop;
     let scale = 1.0 + 0.16 * pop;
     let phase = slot.phase;
     let (border, fill) = match phase {
@@ -222,7 +234,7 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
             (alpha(AMBER, 0.45 + 0.5 * breathe), SURFACE_HI)
         }
         Phase::Provisional => (alpha(AMBER, 0.28), SURFACE_HI),
-        Phase::Final => (alpha(GREEN, 0.38), SURFACE_HI),
+        Phase::Final => (alpha(TEAL, 0.38), SURFACE_HI),
     };
     if phase == Phase::Active {
         let glow = 0.5 + 0.5 * (time * 4.0).sin();
@@ -232,14 +244,20 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
         painter.rect_filled(
             rect.expand(3.0 * pop),
             13.0,
-            alpha(
-                if phase == Phase::Final { GREEN } else { AMBER },
-                0.16 * pop,
-            ),
+            alpha(if phase == Phase::Final { TEAL } else { AMBER }, 0.16 * pop),
         );
     }
     painter.rect_filled(rect, 11.0, fill);
     painter.rect_stroke(rect, 11.0, Stroke::new(1.2, border), StrokeKind::Inside);
+    if anim.ring > 0.0 {
+        let grow = 16.0 * (1.0 - anim.ring);
+        painter.rect_stroke(
+            rect.expand(2.0 + grow),
+            11.0 + grow,
+            Stroke::new(2.5 * anim.ring + 0.5, alpha(TEAL, 0.9 * anim.ring)),
+            StrokeKind::Outside,
+        );
+    }
 
     let digit_y = rect.top() + rect.height() * 0.43;
     match (slot.ch, phase) {
@@ -260,31 +278,38 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
             if !unreadable {
                 paint_symbols(
                     painter,
-                    Pos2::new(rect.center().x, rect.bottom() - 19.0),
+                    Pos2::new(rect.center().x, rect.bottom() - 36.0),
                     pattern_of(ch),
-                    0.85,
+                    0.85_f32.min((rect.width() - 8.0) / symbols_width(pattern_of(ch))),
                     alpha(DIM, 0.8),
                 );
             }
             if phase == Phase::Final {
-                // confidence: how much of the expected beep pattern was heard
+                // confidence: how much of the expected beep pattern was heard, as a bar and a word
                 let bar = Rect::from_min_size(
-                    Pos2::new(rect.left() + 8.0, rect.bottom() - 8.0),
-                    Vec2::new(rect.width() - 16.0, 3.0),
+                    Pos2::new(rect.left() + 8.0, rect.bottom() - 25.0),
+                    Vec2::new(rect.width() - 16.0, 6.0),
                 );
-                painter.rect_filled(bar, 1.5, alpha(FAINT, 0.35));
+                painter.rect_filled(bar, 3.0, alpha(RULE, 0.6));
                 let share = slot.support.clamp(0.0, 1.0);
-                let c = if share >= 0.7 {
-                    GREEN
+                let (c, word) = if share >= 0.7 {
+                    (TEAL, "strong")
                 } else if share >= 0.45 {
-                    AMBER
+                    (AMBER, "ok")
                 } else {
-                    RED
+                    (RED, "weak")
                 };
                 painter.rect_filled(
-                    Rect::from_min_size(bar.min, Vec2::new(bar.width() * share, 3.0)),
-                    1.5,
+                    Rect::from_min_size(bar.min, Vec2::new(bar.width() * share, 6.0)),
+                    3.0,
                     c,
+                );
+                painter.text(
+                    Pos2::new(rect.center().x, rect.bottom() - 10.0),
+                    Align2::CENTER_CENTER,
+                    word,
+                    theme::text(11.0),
+                    DIM,
                 );
             }
         }
@@ -318,23 +343,60 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, time
                 Align2::CENTER_CENTER,
                 "·",
                 theme::digits(rect.width() * 0.6),
-                alpha(FAINT, 0.7),
+                FAINT,
             );
         }
     }
 }
 
+/// What the window last saw in a digit slot, for the one-shot animations.
+#[derive(Clone, Copy, Default)]
+pub struct SlotSeen {
+    ch: Option<char>,
+    is_final: bool,
+    changed_at: f64,
+    settled_at: f64,
+}
+
+/// Animation levels of one slot, each 1.0 at the moment it fires and easing to 0.
+#[derive(Clone, Copy, Default)]
+struct Pop {
+    /// The digit changed.
+    pop: f32,
+    /// The digit went from tentative to final: an expanding ring.
+    ring: f32,
+}
+
+const RING_S: f64 = 0.7;
+
 impl UiState {
-    /// 1.0 right after the slot's digit changed, easing to 0 over a third of a second.
-    fn pop(&mut self, i: usize, ch: Option<char>, now: f64) -> f32 {
-        let entry = &mut self.slot_seen[i];
-        if entry.0 != ch {
-            *entry = (ch, now);
+    fn pop(&mut self, i: usize, ch: Option<char>, is_final: bool, now: f64) -> Pop {
+        let e = &mut self.slot_seen[i];
+        if e.ch != ch {
+            e.changed_at = now;
         }
+        if ch.is_some() && is_final && !e.is_final {
+            e.settled_at = now;
+        }
+        e.ch = ch;
+        e.is_final = ch.is_some() && is_final;
         if ch.is_none() {
-            return 0.0;
+            return Pop::default();
         }
-        let t = ((now - entry.1) / 0.33) as f32;
-        if t >= 1.0 { 0.0 } else { (1.0 - t).powi(2) }
+        let ease = |t: f64| {
+            if t >= 1.0 {
+                0.0
+            } else {
+                (1.0 - t as f32).powi(2)
+            }
+        };
+        Pop {
+            pop: ease((now - e.changed_at) / 0.33),
+            ring: if e.is_final {
+                ease((now - e.settled_at) / RING_S)
+            } else {
+                0.0
+            },
+        }
     }
 }

@@ -9,7 +9,7 @@ use nasdara_decoder::morse::pattern_of;
 
 use super::slots::DASH_FROM_S;
 use crate::engine::Shared;
-use crate::theme::{self, AMBER, DIM, FAINT, GREEN, STROKE, SURFACE_HI, TEXT, alpha};
+use crate::theme::{self, AMBER, DIM, FAINT, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 
 const WINDOW_S: f64 = 24.0;
 /// Space kept right of "now" so a starting beep is visible.
@@ -21,15 +21,56 @@ const DB_LOW: f32 = -5.0;
 const DB_HIGH: f32 = 35.0;
 const ON_DB: f32 = 15.0;
 
-pub fn show(ui: &mut Ui, s: &Shared) {
+/// How much room the signal panel gets: the whole window height decides, so a short window keeps the
+/// result and the cards in view and gives up the ribbon's height first.
+#[derive(Clone, Copy)]
+pub struct Size {
+    ribbon: f32,
+    /// Height of the tone strength trace; 0 hides it and the time axis.
+    level: f32,
+}
+
+impl Size {
+    pub fn for_window_height(h: f32) -> Size {
+        if h >= 720.0 {
+            Size {
+                ribbon: 90.0,
+                level: 48.0,
+            }
+        } else if h >= 600.0 {
+            Size {
+                ribbon: 72.0,
+                level: 36.0,
+            }
+        } else {
+            Size {
+                ribbon: 56.0,
+                level: 0.0,
+            }
+        }
+    }
+
+    pub fn is_compact(self) -> bool {
+        self.level == 0.0
+    }
+}
+
+pub fn show(ui: &mut Ui, s: &Shared, size: Size, still: bool) {
     let width = ui.available_width();
-    let ribbon_h = 90.0;
-    let level_h = 48.0;
-    let (rect, _) =
-        ui.allocate_exact_size(Vec2::new(width, ribbon_h + level_h + 24.0), Sense::hover());
+    let ribbon_h = size.ribbon;
+    let level_h = size.level;
+    let axis_h = if level_h > 0.0 { 24.0 } else { 0.0 };
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(width, ribbon_h + level_h + axis_h),
+        Sense::hover(),
+    );
     let painter = ui.painter_at(rect);
     let now = s.now();
-    let t = ui.input(|i| i.time) as f32;
+    let t = if still {
+        0.0
+    } else {
+        ui.input(|i| i.time) as f32
+    };
 
     let ribbon = Rect::from_min_size(rect.min, Vec2::new(width, ribbon_h));
     let level = Rect::from_min_size(
@@ -37,12 +78,19 @@ pub fn show(ui: &mut Ui, s: &Shared) {
         Vec2::new(width, level_h),
     );
     let axis_y = level.bottom() + 12.0;
+    let line_bottom = if level_h > 0.0 {
+        level.bottom()
+    } else {
+        ribbon.bottom() - 4.0
+    };
 
     let px_per_s = (width - LEAD_PX) / WINDOW_S as f32;
     let x_of = |tt: f64| rect.right() - LEAD_PX - ((now - tt) as f32) * px_per_s;
 
     painter.rect_filled(ribbon, 10.0, alpha(SURFACE_HI, 0.55));
-    painter.rect_filled(level, 10.0, alpha(SURFACE_HI, 0.55));
+    if level_h > 0.0 {
+        painter.rect_filled(level, 10.0, alpha(SURFACE_HI, 0.55));
+    }
 
     // fade at the left edge so beeps leave smoothly
     let fade = |x: f32| ((x - rect.left()) / 60.0).clamp(0.0, 1.0);
@@ -56,25 +104,22 @@ pub fn show(ui: &mut Ui, s: &Shared) {
             continue;
         }
         painter.line_segment(
-            [
-                Pos2::new(x, ribbon.top() + 6.0),
-                Pos2::new(x, level.bottom()),
-            ],
+            [Pos2::new(x, ribbon.top() + 6.0), Pos2::new(x, line_bottom)],
             Stroke::new(1.0, alpha(STROKE, 0.5 * fade(x))),
         );
         let ago = (now - k as f64 * 5.0).round() as i64;
-        if ago > 0 {
+        if ago > 0 && level_h > 0.0 {
             painter.text(
                 Pos2::new(x, axis_y),
                 Align2::CENTER_CENTER,
                 format!("{ago} s"),
-                theme::text(10.5),
+                theme::text(11.0),
                 alpha(FAINT, fade(x)),
             );
         }
     }
 
-    let mid = ribbon.top() + 34.0;
+    let mid = ribbon.top() + ribbon_h * 0.38;
     painter.line_segment(
         [
             Pos2::new(ribbon.left() + 10.0, mid),
@@ -114,21 +159,34 @@ pub fn show(ui: &mut Ui, s: &Shared) {
             continue;
         }
         let f = fade(x0.max(x1.min(x0 + 1.0)));
-        let y = mid + 24.0;
+        let y = mid + ribbon_h * 0.27;
+        let (digit_size, digit_dy) = if ribbon_h >= 80.0 {
+            (19.0, 13.0)
+        } else {
+            (15.0, 11.0)
+        };
         let unreadable = ch == '?';
-        let c = if unreadable { theme::RED } else { GREEN };
-        painter.line_segment(
-            [
-                Pos2::new(x0.max(rect.left() + 6.0), y),
-                Pos2::new(x1 - 4.0, y),
-            ],
-            Stroke::new(1.5, alpha(c, 0.45 * f)),
-        );
+        let c = if unreadable { theme::RED } else { TEAL };
+        let bracket = [
+            Pos2::new(x0.max(rect.left() + 6.0), y),
+            Pos2::new(x1 - 4.0, y),
+        ];
+        if unreadable {
+            // an unreadable digit gets a dashed bracket, not only another colour
+            painter.add(Shape::dashed_line(
+                &bracket,
+                Stroke::new(1.5, alpha(c, 0.7 * f)),
+                4.0,
+                3.0,
+            ));
+        } else {
+            painter.line_segment(bracket, Stroke::new(1.5, alpha(c, 0.45 * f)));
+        }
         painter.text(
-            Pos2::new((x0 + x1 - 4.0) / 2.0, y + 13.0),
+            Pos2::new((x0 + x1 - 4.0) / 2.0, y + digit_dy),
             Align2::CENTER_CENTER,
             ch.to_string(),
-            theme::digits(19.0),
+            theme::digits(digit_size),
             alpha(if unreadable { theme::RED } else { TEXT }, f),
         );
         if !unreadable {
@@ -174,7 +232,13 @@ pub fn show(ui: &mut Ui, s: &Shared) {
         let recent = b
             .end
             .map_or(0.0, |e| (1.0 - ((now - e) / 0.5) as f32).clamp(0.0, 1.0));
-        let glow = if on { 1.0 } else { recent };
+        let glow = if still {
+            0.0
+        } else if on {
+            1.0
+        } else {
+            recent
+        };
         if glow > 0.0 {
             painter.rect_filled(
                 r.expand(5.0 * glow + 1.0),
@@ -200,25 +264,27 @@ pub fn show(ui: &mut Ui, s: &Shared) {
     painter.line_segment(
         [
             Pos2::new(nx, ribbon.top() + 8.0),
-            Pos2::new(nx, level.bottom()),
+            Pos2::new(nx, line_bottom),
         ],
         Stroke::new(1.5, alpha(AMBER, 0.55 * pulse)),
     );
 
-    paint_level(&painter, s, level, &x_of, now, rect.left());
-    painter.text(
-        Pos2::new(level.left() + 10.0, level.top() + 9.0),
-        Align2::LEFT_CENTER,
-        "TONE STRENGTH",
-        theme::bold(9.5),
-        alpha(FAINT, 0.9),
-    );
+    if level_h > 0.0 {
+        paint_level(&painter, s, level, &x_of, now, rect.left());
+        painter.text(
+            Pos2::new(level.left() + 10.0, level.top() + 9.0),
+            Align2::LEFT_CENTER,
+            "TONE STRENGTH",
+            theme::bold(11.0),
+            FAINT,
+        );
+    }
     painter.text(
         Pos2::new(ribbon.left() + 10.0, ribbon.top() + 11.0),
         Align2::LEFT_CENTER,
         "MORSE",
-        theme::bold(9.5),
-        alpha(FAINT, 0.9),
+        theme::bold(11.0),
+        FAINT,
     );
     let _ = DIM;
 }
