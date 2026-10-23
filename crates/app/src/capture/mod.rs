@@ -8,12 +8,15 @@ mod pacer;
 mod win;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{SyncSender, TrySendError};
 
 use serde::{Deserialize, Serialize};
 
 pub const SAMPLE_RATE: usize = 44_100;
+
+/// Messages the channel from capture to engine holds: about 5 s of 10 ms chunks.
+pub const CHANNEL_CAPACITY: usize = 500;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Source {
@@ -51,15 +54,38 @@ pub struct Message {
 #[derive(Clone)]
 pub struct Sink {
     generation: u64,
-    tx: Sender<Message>,
+    tx: SyncSender<Message>,
+    /// Sample chunks thrown away because the engine had fallen behind.
+    dropped: Arc<AtomicU64>,
 }
 
 impl Sink {
-    pub fn new(generation: u64, tx: Sender<Message>) -> Sink {
-        Sink { generation, tx }
+    pub fn new(generation: u64, tx: SyncSender<Message>) -> Sink {
+        Sink {
+            generation,
+            tx,
+            dropped: Arc::new(AtomicU64::new(0)),
+        }
     }
 
+    /// Live audio never waits for the engine: when the channel is full the chunk is dropped and counted.
     /// `false` when the engine is gone.
+    pub fn send_samples(&self, pcm: Vec<i16>) -> bool {
+        let message = Message {
+            generation: self.generation,
+            event: Event::Samples(pcm),
+        };
+        match self.tx.try_send(message) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+                true
+            }
+            Err(TrySendError::Disconnected(_)) => false,
+        }
+    }
+
+    /// Waits for room: for status changes and for the demo, which must not lose samples. `false` when the engine is gone.
     pub fn send(&self, event: Event) -> bool {
         self.tx
             .send(Message {
@@ -74,27 +100,40 @@ impl Sink {
 /// not freeze the engine. Whatever it still sends is dropped by the engine, which has moved on to a newer generation.
 pub struct Capture {
     stop: Arc<AtomicBool>,
+    dropped: Arc<AtomicU64>,
 }
 
 impl Capture {
-    pub fn live(source: Source, generation: u64, tx: Sender<Message>) -> Capture {
-        let sink = Sink::new(generation, tx);
-        Self::spawn("capture", move |stop| live(source, sink, stop))
+    pub fn live(source: Source, generation: u64, tx: SyncSender<Message>) -> Capture {
+        Self::spawn("capture", Sink::new(generation, tx), move |sink, stop| {
+            live(source, sink, stop)
+        })
     }
 
     /// Plays `pcm` into the pipeline at `speed` times real time.
-    pub fn demo(pcm: Vec<i16>, speed: f64, generation: u64, tx: Sender<Message>) -> Capture {
-        let sink = Sink::new(generation, tx);
-        Self::spawn("demo", move |stop| demo::play(pcm, speed, sink, stop))
+    pub fn demo(pcm: Vec<i16>, speed: f64, generation: u64, tx: SyncSender<Message>) -> Capture {
+        Self::spawn("demo", Sink::new(generation, tx), move |sink, stop| {
+            demo::play(pcm, speed, sink, stop)
+        })
     }
 
-    fn spawn(name: &str, run: impl FnOnce(Arc<AtomicBool>) + Send + 'static) -> Capture {
+    fn spawn(
+        name: &str,
+        sink: Sink,
+        run: impl FnOnce(Sink, Arc<AtomicBool>) + Send + 'static,
+    ) -> Capture {
         let stop = Arc::new(AtomicBool::new(false));
+        let dropped = sink.dropped.clone();
         let flag = stop.clone();
         let _ = std::thread::Builder::new()
             .name(name.into())
-            .spawn(move || run(flag));
-        Capture { stop }
+            .spawn(move || run(sink, flag));
+        Capture { stop, dropped }
+    }
+
+    /// Chunks dropped since the last call.
+    pub fn take_dropped(&self) -> u64 {
+        self.dropped.swap(0, Ordering::Relaxed)
     }
 }
 
@@ -126,7 +165,8 @@ mod tests {
     fn dropping_a_capture_does_not_wait_for_a_stuck_thread() {
         let (release, parked) = mpsc::channel::<()>();
         let (stopped_tx, stopped) = mpsc::channel();
-        let capture = Capture::spawn("stuck", move |stop| {
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        let capture = Capture::spawn("stuck", Sink::new(0, tx), move |_, stop| {
             // a thread blocked in a call that never returns, until the test lets go
             let _ = parked.recv();
             let _ = stopped_tx.send(stop.load(Ordering::Relaxed));
@@ -137,5 +177,19 @@ mod tests {
         // the detached thread still sees the stop flag when it wakes
         release.send(()).unwrap();
         assert_eq!(stopped.recv_timeout(Duration::from_secs(5)), Ok(true));
+    }
+
+    #[test]
+    fn a_full_channel_drops_chunks_and_counts_them() {
+        let (tx, rx) = mpsc::sync_channel(2);
+        let sink = Sink::new(0, tx);
+        let dropped = sink.dropped.clone();
+        for _ in 0..5 {
+            assert!(sink.send_samples(vec![1; 441]));
+        }
+        assert_eq!(dropped.load(Ordering::Relaxed), 3);
+        assert_eq!(rx.try_iter().count(), 2);
+        drop(rx);
+        assert!(!sink.send_samples(vec![1]));
     }
 }

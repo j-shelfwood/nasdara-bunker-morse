@@ -160,7 +160,7 @@ fn probe(seconds: u64, report: &PathBuf, source: Source) {
     use std::io::Write;
     use std::time::{Duration, Instant};
 
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = std::sync::mpsc::sync_channel(crate::capture::CHANNEL_CAPACITY);
     let _capture = Capture::live(source, 0, tx);
     let started = Instant::now();
     let (mut samples, mut peak, mut statuses) = (0usize, 0i16, Vec::new());

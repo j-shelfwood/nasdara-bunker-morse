@@ -128,7 +128,7 @@ impl Session {
                 }
             }
             let due = pacer.due(now);
-            if !due.is_empty() && !tx.send(Event::Samples(due)) {
+            if !due.is_empty() && !tx.send_samples(due) {
                 break Ended::ProcessGone;
             }
             // wakes on new audio; times out when nothing plays, which is when the pacer supplies the silence

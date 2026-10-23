@@ -15,7 +15,8 @@ pub struct Pacer {
 /// Chunk size (10 ms) and the jitter buffer kept between the wall clock and the output (20 ms).
 const CHUNK: usize = SAMPLE_RATE / 100;
 const LATENCY: i64 = (SAMPLE_RATE / 50) as i64;
-/// More than this much unread audio means the consumer stalled: keep the newest second.
+/// More than this much audio waiting for the wall clock means the device delivered a backlog (after a stall or a
+/// suspended stream): keep the newest second. The pacer cannot see the engine; back-pressure is the sink's job.
 const MAX_PENDING: usize = SAMPLE_RATE * 2;
 
 impl Pacer {
@@ -76,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stalled_consumer_keeps_the_newest_audio() {
+    fn a_backlog_from_the_device_keeps_the_newest_audio() {
         let mut p = Pacer::new(Instant::now());
         p.push(std::iter::repeat_n(1, SAMPLE_RATE * 5));
         assert_eq!(p.pending.len(), SAMPLE_RATE);

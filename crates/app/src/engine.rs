@@ -1,7 +1,7 @@
 //! The listening side: takes audio from a source, runs the decoder and keeps the state the window draws.
 
 use std::collections::VecDeque;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -11,7 +11,7 @@ use nasdara_decoder::ledger::BunkerLedger;
 use nasdara_decoder::pipeline::{Pipeline, Preview};
 use nasdara_decoder::synth;
 
-use crate::capture::{Capture, Event, Message, Source, Status};
+use crate::capture::{CHANNEL_CAPACITY, Capture, Event, Message, Source, Status};
 use crate::log::{DebugLog, LogLine};
 
 /// How much history the window can draw.
@@ -187,6 +187,8 @@ struct Engine {
     pipeline: Pipeline,
     ledger: BunkerLedger,
     capture: Option<Capture>,
+    /// The note about dropped audio is added once per session.
+    drops_noted: bool,
     /// Session counter: bumped on every restart; events of an older generation belong to a replaced capture.
     generation: u64,
     source: Source,
@@ -212,6 +214,7 @@ impl Engine {
             pipeline: Pipeline::new(),
             ledger: BunkerLedger::new(),
             capture: None,
+            drops_noted: false,
             generation: 0,
             source,
             mode: Mode::Live,
@@ -224,7 +227,7 @@ impl Engine {
     }
 
     fn run(mut self, commands: Receiver<Command>) {
-        let (tx, events) = mpsc::channel();
+        let (tx, events) = mpsc::sync_channel(CHANNEL_CAPACITY);
         self.restart(&tx);
         loop {
             while let Ok(c) = commands.try_recv() {
@@ -235,12 +238,15 @@ impl Engine {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+            let dropped = self.capture.as_ref().map_or(0, Capture::take_dropped);
+            self.note_drops(dropped);
         }
     }
 
-    fn restart(&mut self, tx: &Sender<Message>) {
+    fn restart(&mut self, tx: &SyncSender<Message>) {
         self.capture = None;
         self.generation += 1;
+        self.drops_noted = false;
         self.reset_stream();
         let (mode, speed) = (
             self.mode,
@@ -280,6 +286,20 @@ impl Engine {
         self.ctx.request_repaint();
     }
 
+    fn note_drops(&mut self, dropped: u64) {
+        if dropped == 0 || self.drops_noted {
+            return;
+        }
+        self.drops_noted = true;
+        let mut s = self.lock();
+        s.notes.push(Note::Warn(
+            "Audio was dropped because the app fell behind".into(),
+        ));
+        trim_notes(&mut s.notes);
+        drop(s);
+        self.ctx.request_repaint();
+    }
+
     /// A fresh decoder and beep tracker for a new stream.
     fn reset_stream(&mut self) {
         self.pipeline = Pipeline::new();
@@ -316,7 +336,7 @@ impl Engine {
         self.ctx.request_repaint();
     }
 
-    fn command(&mut self, c: Command, tx: &Sender<Message>) {
+    fn command(&mut self, c: Command, tx: &SyncSender<Message>) {
         match c {
             Command::SetSource(source) => {
                 self.source = source;
@@ -595,7 +615,7 @@ mod tests {
     #[test]
     fn a_restart_retires_the_queued_events_of_the_old_capture() {
         let mut e = engine(0);
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
         e.restart(&tx);
         let old = e.generation;
         e.command(Command::StopDemo, &tx);
@@ -714,5 +734,19 @@ mod tests {
             after > heard,
             "heard {heard} before, {after} after the flush"
         );
+    }
+
+    #[test]
+    fn dropped_audio_adds_one_note_per_session() {
+        let mut e = engine(0);
+        e.note_drops(0);
+        assert!(e.lock().notes.is_empty());
+        e.note_drops(3);
+        e.note_drops(7);
+        assert_eq!(e.lock().notes.len(), 1);
+        let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+        e.restart(&tx);
+        e.note_drops(1);
+        assert_eq!(e.lock().notes.len(), 2);
     }
 }
