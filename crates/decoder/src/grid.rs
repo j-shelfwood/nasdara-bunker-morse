@@ -74,6 +74,15 @@ fn patterns_of(t: &Timing) -> Vec<Pattern> {
         .collect()
 }
 
+/// Seconds from a digit's start to the end of its last symbol window for the longest digit (all dashes): until a
+/// trace extends this far past a start, a shorter look-alike digit may still be displaced by the real, longer one.
+pub fn longest_digit_s(timing: &Timing) -> f64 {
+    patterns_of(timing)
+        .iter()
+        .map(|p| (p.len - p.tail) as f64 * FRAME_SECONDS)
+        .fold(0.0, f64::max)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GridDecode {
     pub digits: Vec<char>,
@@ -160,7 +169,15 @@ impl Dp {
             }
         }
         for j in 0..count {
-            for start in 0..frames {
+            // Only starts within the jitter of a reachable end of row `j` can have a predecessor.
+            let row = &self.best[j * stride..(j + 1) * stride];
+            let Some(lo) = row.iter().position(|&b| b != NEG) else {
+                break;
+            };
+            let hi = row.iter().rposition(|&b| b != NEG).unwrap_or(lo);
+            let first = lo.saturating_sub(jitter);
+            let last = (hi + jitter).min(frames - 1);
+            for start in first..=last {
                 let mut base = NEG;
                 let mut from = None;
                 for f in start.saturating_sub(jitter)..=(start + jitter).min(stride - 1) {
@@ -243,11 +260,13 @@ impl Dp {
     }
 }
 
-/// Decodes exactly `count` digits that end the best-scoring path through the whole trace.
+/// Decodes exactly `count` digits that end the best-scoring path through the whole trace. `count` is clamped to
+/// `DIGITS_PER_RECORD`: the table has one row per digit, so a larger count only costs memory.
 pub fn decode_grid(db: &[i8], count: usize, timing: &Timing) -> Option<GridDecode> {
     if count == 0 {
         return None;
     }
+    let count = count.min(DIGITS_PER_RECORD);
     let dp = Dp::new(db, count, timing)?;
     let row = &dp.best[count * dp.stride..(count + 1) * dp.stride];
     let mut end = None;
@@ -262,10 +281,12 @@ pub fn decode_grid(db: &[i8], count: usize, timing: &Timing) -> Option<GridDecod
 /// Same Viterbi table as `decode_grid`, but the number of digits is free (1..=`max_count`): the best total score
 /// over (digit count, end frame) picks the prefix the audio supports, because a digit placed on frames without tone
 /// adds a negative score. For a live preview while a transmission is still arriving. `None` when nothing scores above 0.
+/// `max_count` is clamped to `DIGITS_PER_RECORD`.
 pub fn decode_prefix(db: &[i8], timing: &Timing, max_count: usize) -> Option<GridDecode> {
     if max_count == 0 {
         return None;
     }
+    let max_count = max_count.min(DIGITS_PER_RECORD);
     let dp = Dp::new(db, max_count, timing)?;
     let mut pick: Option<(usize, usize)> = None;
     let mut top = 0.0;

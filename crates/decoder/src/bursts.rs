@@ -76,6 +76,10 @@ impl Burst {
 /// A message is 10 digits of 5 symbols; fewer beeps than this is a stray tone or a few seconds of one.
 const MIN_BURST_ELEMENTS: usize = 20;
 
+/// A burst longer than this is not a message (a real one is about 90 s, three bunkers are separated by 6 s pauses): a
+/// periodic chirp would otherwise hold beeps forever. It is emitted as ignored and a new burst starts.
+pub const MAX_BURST_SPAN_S: f64 = 200.0;
+
 #[derive(Debug, Clone, Copy)]
 pub struct AssemblerOptions {
     pub quiet_s: f64,
@@ -114,6 +118,16 @@ impl BurstAssembler {
         let mut out = Vec::new();
         for r in runs {
             if r.on {
+                if self
+                    .beeps
+                    .first()
+                    .is_some_and(|f| r.start - f.start > MAX_BURST_SPAN_S)
+                {
+                    out.extend(self.finish_with(Some(format!(
+                        "longer than {MAX_BURST_SPAN_S} s without a {}-s pause, not a message",
+                        self.opts.quiet_s
+                    ))));
+                }
                 if self.beeps.is_empty() {
                     self.first_gap = self.off_acc;
                 }
@@ -138,13 +152,20 @@ impl BurstAssembler {
     }
 
     fn finish(&mut self) -> Option<Burst> {
+        self.finish_with(None)
+    }
+
+    /// Ends the burst in progress; `forced_ignore` is the reason when it must not be decoded whatever its length.
+    fn finish_with(&mut self, forced_ignore: Option<String>) -> Option<Burst> {
         let beeps = std::mem::take(&mut self.beeps);
         let (first, last) = (*beeps.first()?, *beeps.last()?);
-        let ignored = (beeps.len() < MIN_BURST_ELEMENTS).then(|| {
-            format!(
-                "only {} beeps, a message has at least {MIN_BURST_ELEMENTS}",
-                beeps.len()
-            )
+        let ignored = forced_ignore.or_else(|| {
+            (beeps.len() < MIN_BURST_ELEMENTS).then(|| {
+                format!(
+                    "only {} beeps, a message has at least {MIN_BURST_ELEMENTS}",
+                    beeps.len()
+                )
+            })
         });
         Some(Burst {
             start: first.start,

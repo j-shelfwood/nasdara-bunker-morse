@@ -2,7 +2,7 @@
 
 use crate::bunkers::snap_grid;
 use crate::bursts::{AssemblerOptions, BunkerRecord, Burst, BurstAssembler, Trace};
-use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_grid, decode_prefix};
+use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_grid, decode_prefix, longest_digit_s};
 use crate::js_round;
 use crate::runs::{RunOptions, RunTracker};
 use crate::tone::{FRAME_SECONDS, ToneDetector, ToneFrame};
@@ -14,6 +14,8 @@ pub struct Live {
     pub db: f32,
 }
 
+/// One second of audio: the most `push` analyses before it trims the trace and decodes finished bursts.
+const PUSH_STEP_SAMPLES: usize = 44_100;
 const TRACE_KEEP_S: f64 = 150.0;
 const TRACE_MARGIN_S: f64 = 2.0;
 /// Below this a digit is reported as '?': the beeps that would decide it were not (all) heard.
@@ -23,8 +25,16 @@ const MIN_READABLE: usize = 6;
 /// A preview needs this many tone runs in the open burst; fewer is a stray tone.
 const PREVIEW_MIN_RUNS: usize = 6;
 /// Recompute the preview only after this many new frames.
-const PREVIEW_REFRESH_FRAMES: u64 = 40;
+/// The decoder's jitter allowance: a digit counts as settled only when the trace extends this far past its window.
+const SETTLE_S: f64 = 0.12;
+/// A closed burst's preview is dropped after this long even if its burst never arrives.
+const PREVIEW_HOLD_S: f64 = 3.0;
+const PREVIEW_REFRESH_FRAMES: u64 = 60;
+/// The preview decodes at most this many seconds of the open burst (the newest): a message is about 90 s.
+const PREVIEW_MAX_S: f64 = 100.0;
 
+/// One digit of a live preview. A digit whose last symbol window is still open (`settled == false`) may change on the
+/// next preview: a shorter look-alike that fits the audio so far can take its place until the window has passed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewDigit {
     /// '?' when the support is below `MIN_SUPPORT`.
@@ -35,8 +45,14 @@ pub struct PreviewDigit {
     pub start: f64,
     /// Stream seconds at which the digit's last symbol window ended.
     pub window_end: f64,
+    /// False while the digit may still change in later previews: only the trailing digit can be unsettled, and it
+    /// is until the trace extends past `window_end` plus the jitter allowance (`SETTLE_S`) and past the longest
+    /// digit's length from the digit's start, because a shorter look-alike fits the audio first (4821: the fifth digit
+    /// reads 5, 6, 4, 7, 8, 9 before the real 0). A UI should not present an unsettled digit as read.
+    pub settled: bool,
 }
 
+/// Digits read from the transmission in progress. Digits with `settled == false` (only ever the last) may change.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preview {
     /// Stream seconds of the first digit.
@@ -58,8 +74,17 @@ struct OpenBurst {
     id: u64,
     first_frame: u64,
     on_runs: usize,
-    run_frames: usize,
     off_frames: usize,
+}
+
+/// An open burst that has just closed: its preview is still served until the burst itself is emitted.
+#[derive(Debug)]
+struct Closing {
+    open: OpenBurst,
+    frames_at_close: u64,
+    bursts_at_close: u64,
+    /// The burst has been emitted: the preview goes at the next push.
+    released: bool,
 }
 
 #[derive(Debug)]
@@ -75,6 +100,8 @@ pub struct Pipeline {
     bursts: BurstAssembler,
     opts: RunOptions,
     live: Live,
+    /// Consecutive frames the live hysteresis has been on.
+    live_run: usize,
     /// Rounded tone levels of the last `TRACE_KEEP_S` seconds: the burst decoder works on these, not on beep counts.
     levels: Vec<i8>,
     levels_end: f64,
@@ -82,6 +109,8 @@ pub struct Pipeline {
     /// Absolute frame number of `levels[0]`.
     levels_base: u64,
     open: Option<OpenBurst>,
+    closing: Option<Closing>,
+    bursts_emitted: u64,
     next_burst_id: u64,
     cache: Mutex<Option<PreviewCache>>,
 }
@@ -94,6 +123,10 @@ impl Default for Pipeline {
 
 fn keep_frames() -> usize {
     (TRACE_KEEP_S / FRAME_SECONDS).ceil() as usize
+}
+
+fn preview_max_frames() -> usize {
+    (PREVIEW_MAX_S / FRAME_SECONDS).ceil() as usize
 }
 
 fn unpoison<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -117,11 +150,14 @@ impl Pipeline {
                 on: false,
                 db: -99.0,
             },
+            live_run: 0,
             levels: Vec::new(),
             levels_end: 0.0,
             frames_total: 0,
             levels_base: 0,
             open: None,
+            closing: None,
+            bursts_emitted: 0,
             next_burst_id: 0,
             cache: Mutex::new(None),
         }
@@ -136,11 +172,25 @@ impl Pipeline {
         self.bursts.pending()
     }
 
+    /// Feeds samples. A long slice is processed in steps of `PUSH_STEP_SAMPLES`, so the tone trace is trimmed and the
+    /// finished bursts are decoded while their frames are still held, however much is pushed at once.
     pub fn push(&mut self, samples: &[i16]) -> PushResult {
+        let mut out = PushResult::default();
+        for step in samples.chunks(PUSH_STEP_SAMPLES) {
+            let r = self.push_step(step);
+            out.frames.extend(r.frames);
+            out.bursts.extend(r.bursts);
+        }
+        out
+    }
+
+    fn push_step(&mut self, samples: &[i16]) -> PushResult {
+        if self.closing.as_ref().is_some_and(|c| c.released) {
+            self.closing = None;
+        }
         let frames = self.tone.push(samples);
         for f in &frames {
-            let prev_on = self.live.on;
-            let on = if prev_on {
+            let on = if self.live.on {
                 f.db > self.opts.off_db
             } else {
                 f.db >= self.opts.on_db
@@ -149,7 +199,7 @@ impl Pipeline {
             self.levels
                 .push(js_round(f64::from(f.db)).clamp(-30.0, 60.0) as i8);
             self.levels_end = f.t;
-            self.track_open(prev_on, on);
+            self.track_open(on);
             self.frames_total += 1;
         }
         let keep = keep_frames();
@@ -159,13 +209,27 @@ impl Pipeline {
             self.levels_base += cut as u64;
         }
         let runs = self.runs.push(&frames);
-        let bursts = self
+        let bursts: Vec<Burst> = self
             .bursts
             .push(&runs)
             .into_iter()
             .map(|b| self.decode(b))
             .collect();
+        self.bursts_emitted += bursts.len() as u64;
+        let hold = (PREVIEW_HOLD_S / FRAME_SECONDS).ceil() as u64;
+        if let Some(c) = &mut self.closing {
+            c.released |= self.bursts_emitted > c.bursts_at_close;
+            if self.frames_total - c.frames_at_close > hold {
+                self.closing = None;
+            }
+        }
         PushResult { frames, bursts }
+    }
+
+    /// Back to the state of `Pipeline::with_options` with the same options: a fresh detector, levels, runs and
+    /// assembler, so a capture can restart without constructing a new pipeline.
+    pub fn reset(&mut self) {
+        *self = Self::with_options(self.opts);
     }
 
     pub fn flush(&mut self) -> Vec<Burst> {
@@ -173,42 +237,53 @@ impl Pipeline {
         let mut bursts = self.bursts.push(&runs);
         bursts.extend(self.bursts.flush());
         self.open = None;
+        self.closing = None;
         bursts.into_iter().map(|b| self.decode(b)).collect()
     }
 
-    fn track_open(&mut self, prev_on: bool, on: bool) {
+    /// A frame counts as on for the open burst only once the live hysteresis has been on for `min_on_s` in a row, the
+    /// glitch rule the run tracker applies: a stray spike neither opens a burst nor keeps one open.
+    fn track_open(&mut self, on: bool) {
         let quiet_frames = (self.opts.quiet_s / FRAME_SECONDS).ceil() as usize;
         let min_on_frames = (self.opts.min_on_s / FRAME_SECONDS).ceil() as usize;
-        if on {
+        self.live_run = if on { self.live_run + 1 } else { 0 };
+        if self.live_run >= min_on_frames {
+            let run_start = self.frames_total + 1 - self.live_run as u64;
             let open = self.open.get_or_insert_with(|| {
+                self.closing = None;
                 self.next_burst_id += 1;
                 OpenBurst {
                     id: self.next_burst_id,
-                    first_frame: self.frames_total,
+                    first_frame: run_start,
                     on_runs: 0,
-                    run_frames: 0,
                     off_frames: 0,
                 }
             });
             open.off_frames = 0;
-            open.run_frames = if prev_on { open.run_frames + 1 } else { 1 };
-            if open.run_frames == min_on_frames {
+            if self.live_run == min_on_frames {
                 open.on_runs += 1;
             }
         } else if let Some(open) = &mut self.open {
             open.off_frames += 1;
             if open.off_frames >= quiet_frames {
-                self.open = None;
+                self.closing = self.open.take().map(|open| Closing {
+                    open,
+                    frames_at_close: self.frames_total,
+                    bursts_at_close: self.bursts_emitted,
+                    released: false,
+                });
             }
         }
     }
 
     /// Digits read from the transmission in progress so far. `None` outside a transmission or before it has
-    /// `PREVIEW_MIN_RUNS` tone runs. Cached: recomputed after `PREVIEW_REFRESH_FRAMES` new frames.
+    /// `PREVIEW_MIN_RUNS` tone runs. After the transmission closes the last preview is kept until the push after
+    /// its `Burst` was emitted. Cached: recomputed after `PREVIEW_REFRESH_FRAMES` new frames.
     pub fn preview(&self) -> Option<Preview> {
         let open = self
             .open
             .as_ref()
+            .or(self.closing.as_ref().map(|c| &c.open))
             .filter(|o| o.on_runs >= PREVIEW_MIN_RUNS)?;
         let mut cache = unpoison(&self.cache);
         if let Some(c) = cache.as_ref()
@@ -231,11 +306,14 @@ impl Pipeline {
         let first = open.first_frame.saturating_sub(self.levels_base) as usize;
         let from = first
             .saturating_sub(margin)
-            .max(self.levels.len().saturating_sub(keep_frames()));
+            .max(self.levels.len().saturating_sub(preview_max_frames()));
         let trace = self.levels.get(from..)?;
         let t0 = self.level_time(from);
         let g = decode_prefix(trace, &SHIPPED_TIMING, DIGITS_PER_RECORD)?;
-        let digits = (0..g.digits.len())
+        let trace_end = self.levels_end;
+        let longest = longest_digit_s(&SHIPPED_TIMING);
+        let n = g.digits.len();
+        let digits = (0..n)
             .map(|i| PreviewDigit {
                 ch: if g.support[i] >= MIN_SUPPORT {
                     g.digits[i]
@@ -246,6 +324,9 @@ impl Pipeline {
                 margin: g.margins[i],
                 start: t0 + g.starts[i],
                 window_end: t0 + g.ends[i],
+                settled: i + 1 < n
+                    || (t0 + g.ends[i] + SETTLE_S <= trace_end
+                        && t0 + g.starts[i] + longest + SETTLE_S <= trace_end),
             })
             .collect();
         Some(Preview {
@@ -317,6 +398,21 @@ impl Pipeline {
 }
 
 /// `Number(s.toFixed(2))`
+/// Never returns negative zero.
 fn round2(s: f32) -> f32 {
-    format!("{s:.2}").parse().unwrap_or(s)
+    let r: f32 = format!("{s:.2}").parse().unwrap_or(s);
+    if r == 0.0 { 0.0 } else { r }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::round2;
+
+    #[test]
+    fn round2_never_returns_negative_zero() {
+        assert_eq!(round2(-0.001).to_bits(), 0.0f32.to_bits());
+        assert_eq!(round2(-0.0).to_bits(), 0.0f32.to_bits());
+        assert_eq!(round2(1.0549), 1.05);
+        assert_eq!(round2(-0.4), -0.4);
+    }
 }
