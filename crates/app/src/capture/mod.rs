@@ -34,6 +34,27 @@ pub enum Status {
     Failed(String),
 }
 
+/// The status text for a capture that could not start. Capturing one process needs Windows build 20348 or later,
+/// so the game source points at the system source, which works everywhere.
+#[cfg(any(windows, test))]
+fn failure_message(source: Source, reason: &str) -> String {
+    match source {
+        Source::Game => {
+            format!("Capturing DayZ's audio failed ({reason}). Switch to System audio.")
+        }
+        Source::System => format!("No audio device: {reason}"),
+    }
+}
+
+/// How long to wait before trying again after a failed start.
+#[cfg(any(windows, test))]
+fn retry_after(source: Source) -> std::time::Duration {
+    match source {
+        Source::Game => std::time::Duration::from_secs(5),
+        Source::System => std::time::Duration::from_secs(2),
+    }
+}
+
 pub enum Event {
     Status(Status),
     Samples(Vec<i16>),
@@ -193,5 +214,20 @@ mod tests {
         assert_eq!(rx.try_iter().count(), 2);
         drop(rx);
         assert!(!sink.send_samples(vec![1]));
+    }
+
+    #[test]
+    fn a_failed_game_capture_points_at_system_audio_and_retries_slowly() {
+        let m = failure_message(Source::Game, "E_NOTIMPL");
+        assert_eq!(
+            m,
+            "Capturing DayZ's audio failed (E_NOTIMPL). Switch to System audio."
+        );
+        assert_eq!(retry_after(Source::Game), std::time::Duration::from_secs(5));
+        assert_eq!(
+            failure_message(Source::System, "gone"),
+            "No audio device: gone"
+        );
+        assert!(retry_after(Source::System) < retry_after(Source::Game));
     }
 }

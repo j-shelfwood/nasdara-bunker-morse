@@ -16,7 +16,7 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitFo
 use windows::core::HRESULT;
 
 use super::pacer::Pacer;
-use super::{Event, SAMPLE_RATE, Sink, Source, Status};
+use super::{Event, SAMPLE_RATE, Sink, Source, Status, failure_message, retry_after};
 
 const GAME_EXE: &str = "DayZ_x64.exe";
 const PROBE_EVERY: Duration = Duration::from_secs(2);
@@ -63,7 +63,11 @@ pub fn run(source: Source, tx: Sink, stop: Arc<AtomicBool>) {
                     Ended::DeviceChanged => continue,
                 }
             }
-            Err(e) => say(Status::Failed(e)),
+            Err(e) => {
+                say(Status::Failed(failure_message(source, &e)));
+                sleep_unless_stopped(&stop, retry_after(source));
+                continue;
+            }
         }
         sleep_unless_stopped(&stop, PROBE_EVERY);
     }
@@ -103,11 +107,10 @@ impl Session {
                     d.get_iaudioclient()
                 })
                 .map_err(|e| e.to_string()),
-        }
-        .map_err(|e| format!("No audio device: {e}"))?;
+        }?;
         client
             .initialize_client(&format, &Direction::Capture, &mode)
-            .map_err(|e| format!("Audio capture refused: {e}"))?;
+            .map_err(|e| format!("initialize: {e}"))?;
         let event = client.set_get_eventhandle().map_err(|e| e.to_string())?;
         let capture = client.get_audiocaptureclient().map_err(|e| e.to_string())?;
         client.start_stream().map_err(|e| e.to_string())?;
