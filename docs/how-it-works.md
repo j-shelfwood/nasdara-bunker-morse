@@ -65,8 +65,8 @@ wind, pings, dropouts, lost beeps, length and pitch variance), so no game audio 
 demo in the app. One test also replays beep lengths and gaps measured on the live broadcast (numbers only, in
 `crates/decoder/tests/fixtures`).
 
-Decoding stays exact with wind up to about half the loudness of a beep and fails above that. Wind alone never produced a
-false transmission in tests.
+Decoding was exact in tests with wind up to about half the loudness of a beep. Louder wind was not tested for exactness.
+Wind alone never produced a false transmission in tests.
 
 ## Assumed
 
