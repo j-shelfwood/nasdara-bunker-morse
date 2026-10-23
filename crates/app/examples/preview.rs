@@ -1,5 +1,6 @@
 //! Renders the window to PNG files with a real engine fed by the demo transmission, for checking the look without
 //! a display: `cargo run --release --example preview -- <out-dir> [--size WxH] <stream-second>...`.
+//! `--result ... --hover N` also renders the result with the hover card of bunker N (1..23) open.
 //! `--menu` (with no stream seconds) also renders the options menu open.
 //! `--size 760x520` renders at another window size in points (default 1060x800); file names then carry the size.
 //! Set NASDARA_FONT_DIR to a folder with segoeui.ttf, segoeuib.ttf and bahnschrift.ttf to preview with the Windows fonts.
@@ -22,6 +23,7 @@ fn main() {
     let mut result: Option<String> = None;
     // `--reduce-motion` sets the setting; `--twice` renders a second frame 0.3 s later and prints how many pixels moved
     let (mut reduce_motion, mut twice, mut menu) = (false, false, false);
+    let mut hover: Option<usize> = None;
     while let Some(a) = args.next() {
         if a == "--size" {
             let parsed = args.next().and_then(|v| {
@@ -35,6 +37,12 @@ fn main() {
             menu = true;
         } else if a == "--twice" {
             twice = true;
+        } else if a == "--hover" {
+            hover = Some(
+                args.next()
+                    .and_then(|v| v.parse().ok())
+                    .expect("--hover needs a bunker number, e.g. 7"),
+            );
         } else if a == "--result" {
             result = args.next();
         } else if let Ok(m) = a.parse() {
@@ -73,6 +81,20 @@ fn main() {
             &out.join(format!("result-{kind}{suffix}.png")),
         );
         eprintln!("wrote result-{kind}{suffix}.png");
+        if let Some(n) = hover {
+            // the pin is a button: find it by what a screen reader says, put the pointer on it
+            let heard = format!("Bunker {n}, lock code");
+            let label = if harness.query_by_label_contains(&heard).is_some() {
+                heard
+            } else {
+                format!("Bunker {n}, not heard yet")
+            };
+            harness.get_by_label_contains(&label).hover();
+            harness.run_steps(24);
+            let name = format!("result-{kind}-hover{n}{suffix}.png");
+            save(&mut harness, &out.join(&name));
+            eprintln!("wrote {name}");
+        }
         if twice {
             let first = harness.render().expect("render");
             harness.run_steps(20);
