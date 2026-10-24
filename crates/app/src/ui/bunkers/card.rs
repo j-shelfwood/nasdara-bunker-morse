@@ -1,16 +1,16 @@
 use egui::emath::easing::cubic_out;
 use egui::{Align, Align2, Id, Layout, RichText, Role, Sense, Stroke, Ui, Vec2, WidgetInfo};
 
-use super::copied::{copied_recently, mark_copied};
+use super::actions::{self, SPOKEN_HINT, Target};
+use super::copied::copied_recently;
 use super::reading::{Reading, reading, reading_color, reading_mark};
 use crate::engine::Card;
 use crate::theme::{self, AMBER, DIM, RED, STROKE, SURFACE_HI, TEAL, TEXT, alpha};
 use crate::ui::UiState;
 use crate::ui::anim::Motion;
 use crate::ui::anim::{changed_at, egui_time_of, first_seen};
-use crate::ui::hud::{Panel, paint_frame, panel};
-use crate::ui::widgets::{ButtonKind, button, caption};
-use nasdara_decoder::bunkers::is_izurvive_url;
+use crate::ui::hud::{Panel, paint_focus, paint_frame, panel};
+use crate::ui::widgets::caption;
 
 /// Seconds a card takes to fade in, and how long the border glow and the count flash take to settle.
 const APPEAR_S: f32 = 0.32;
@@ -55,15 +55,21 @@ pub(in crate::ui) fn card(ui: &mut Ui, st: &mut UiState, c: &Card) {
         })
         .inner;
     let response = response.interact(Sense::click());
-    let spoken = card_spoken(c, selected);
-    response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, spoken.clone()));
-    if response.clicked() {
-        st.selected = if selected { None } else { Some(c.key.clone()) };
-    }
+    paint_focus(ui.painter(), &response, CELL_CUT);
+    let spoken = format!("{}. {SPOKEN_HINT}", card_facts(c));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, spoken.clone()));
+    let target = Target {
+        key: &c.key,
+        code: &c.code,
+        url: c.url.as_deref(),
+    };
+    actions::menu(&response, st, &target);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand);
 }
 
-fn card_body(ui: &mut Ui, st: &mut UiState, c: &Card, still: bool, flash: f32) {
+fn card_body(ui: &mut Ui, st: &UiState, c: &Card, still: bool, flash: f32) {
     ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
+    let copied = copied_recently(ui.ctx(), st, &c.key);
     ui.horizontal(|ui| {
         reading_mark(ui, reading(c));
         match c.bunker {
@@ -71,13 +77,14 @@ fn card_body(ui: &mut Ui, st: &mut UiState, c: &Card, still: bool, flash: f32) {
             None => caption(ui, "Unknown bunker"),
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let heard = if c.count == 1 {
-                "heard once".to_string()
+            let (text, color) = if copied {
+                ("code copied".to_string(), TEAL)
+            } else if c.count == 1 {
+                ("heard once".to_string(), theme::mix(DIM, AMBER, flash))
             } else {
-                format!("heard {}×", c.count)
+                (format!("heard {}×", c.count), theme::mix(DIM, AMBER, flash))
             };
-            let color = theme::mix(DIM, AMBER, flash);
-            ui.label(RichText::new(heard).font(theme::text(12.5)).color(color));
+            ui.label(RichText::new(text).font(theme::text(12.5)).color(color));
         });
     });
     ui.label(
@@ -88,24 +95,23 @@ fn card_body(ui: &mut Ui, st: &mut UiState, c: &Card, still: bool, flash: f32) {
     );
     code_row(ui, c, still);
     status_line(ui, c);
-    ui.add_space(2.0);
-    ui.horizontal(|ui| {
-        if let Some(url) = c.url.as_deref().filter(|u| is_izurvive_url(u))
-            && button(ui, "Open map", ButtonKind::Primary).clicked()
-        {
-            let _ = open::that(url);
-        }
-        let copied = copied_recently(ui.ctx(), st, &c.key);
-        let label = if copied { "Copied" } else { "Copy code" };
-        if button(ui, label, ButtonKind::Quiet).clicked() {
-            ui.ctx().copy_text(c.code.clone());
-            mark_copied(st, &c.key);
-        }
-    });
 }
 
-/// What a screen reader says for a card.
+/// What a screen reader says for a tile: the card's facts, and whether the map marks it.
 pub(super) fn card_spoken(c: &Card, selected: bool) -> String {
+    format!(
+        "{}. {} on the map",
+        card_facts(c),
+        if selected {
+            "Highlighted"
+        } else {
+            "Select to highlight"
+        }
+    )
+}
+
+/// The bunker, its grid, its lock code and how sure the reading is.
+fn card_facts(c: &Card) -> String {
     let digits = |s: &str| {
         s.chars()
             .map(|ch| {
@@ -127,14 +133,9 @@ pub(super) fn card_spoken(c: &Card, selected: bool) -> String {
         Reading::Unclear => format!("{} digits unclear", c.unclear),
     };
     format!(
-        "{name}, grid {}, lock code {}, {state}. {} on the map",
+        "{name}, grid {}, lock code {}, {state}",
         spaced_grid(&c.grid).replace('?', "unclear"),
         digits(&c.code),
-        if selected {
-            "Highlighted"
-        } else {
-            "Select to highlight"
-        }
     )
 }
 

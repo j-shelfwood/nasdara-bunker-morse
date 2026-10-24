@@ -1,6 +1,8 @@
-//! The bunkers heard: a tile for each of the 23 (`roster`), the card of the selected one (`card`), and the
+//! The bunkers heard: a tile for each of the 23 (`roster`), the card of the selected one (`card`), the menu a click
+//! on a card opens (`actions`), and the
 //! placeholder that stands in the dossier slot while there is nothing to show.
 
+pub(super) mod actions;
 mod card;
 pub(super) mod copied;
 mod reading;

@@ -155,6 +155,49 @@ mod tests {
     }
 
     #[test]
+    fn clicking_the_dossier_card_opens_a_menu_with_copy_and_the_web_map() {
+        let mut h = harness(
+            egui::vec2(1060.0, 800.0),
+            vec![card(5, "7??2", 2, 2, false)],
+        );
+        h.run_steps(4);
+        h.get_by_label_contains("Roster tile, bunker 5,").click();
+        h.run_steps(6);
+        assert!(h.query_by_label_contains("Copy code").is_none());
+        h.get_by_label_contains("Bunker 5, grid").click();
+        h.run_steps(4);
+        h.get_by_label("Open on web map");
+        assert_eq!(
+            h.state().1.selected.as_deref(),
+            Some("b5"),
+            "the card stays"
+        );
+        h.get_by_label_contains("Copy code").click();
+        h.run_steps(4);
+        let copied = h.state().1.copied.clone();
+        assert_eq!(copied.map(|(k, _)| k).as_deref(), Some("b5"));
+        assert!(
+            h.query_by_label_contains("Copy code").is_none(),
+            "the menu closes"
+        );
+        assert!(h.query_by_label("Open map").is_none());
+    }
+
+    #[test]
+    fn a_card_without_a_map_link_offers_only_copy() {
+        let mut c = card(5, "7??2", 2, 2, false);
+        c.url = None;
+        let mut h = harness(egui::vec2(1060.0, 800.0), vec![c]);
+        h.run_steps(4);
+        h.get_by_label_contains("Roster tile, bunker 5,").click();
+        h.run_steps(6);
+        h.get_by_label_contains("Bunker 5, grid").click();
+        h.run_steps(4);
+        h.get_by_label_contains("Copy code");
+        assert!(h.query_by_label("Open on web map").is_none());
+    }
+
+    #[test]
     fn every_bunker_has_a_tile_and_an_unheard_one_is_not_a_button() {
         let mut h = harness(MIN_WINDOW, vec![card(5, "7??2", 2, 2, false)]);
         h.run_steps(4);

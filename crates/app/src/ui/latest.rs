@@ -3,15 +3,15 @@
 
 use egui::emath::easing::cubic_out;
 use egui::text::{LayoutJob, TextFormat};
-use egui::{Align, Color32, FontId, Id, Layout, Margin, RichText, Sense, Stroke, Ui, Vec2};
-use nasdara_decoder::bunkers::is_izurvive_url;
+use egui::{Color32, FontId, Id, Margin, RichText, Sense, Stroke, Ui, Vec2};
 
 use super::UiState;
 use super::anim::Motion;
 use super::anim::egui_time_of;
-use super::bunkers::copied::{copied_recently, mark_copied};
-use super::hud::{Panel, paint_frame, panel};
-use super::widgets::{ButtonKind, button, paint_check, paint_question};
+use super::bunkers::actions::{self, SPOKEN_HINT, Target};
+use super::bunkers::copied::copied_recently;
+use super::hud::{Panel, paint_focus, paint_frame, panel};
+use super::widgets::{paint_check, paint_question};
 use crate::engine::{Card, Finished, Shared};
 use crate::theme::{self, AMBER, DIM, RED, TEAL, TEXT, alpha};
 
@@ -21,6 +21,8 @@ const FADE_S: f32 = 0.28;
 /// Inner width below which the strip stacks its rows (the 300 px column).
 const WIDE_FROM: f32 = 560.0;
 const GAP: f32 = 8.0;
+/// Names the latest result in the "code copied" confirmation.
+const LATEST_KEY: &str = "latest";
 
 pub struct Result {
     pub bunker: Option<usize>,
@@ -79,6 +81,7 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) -> bool {
     let arrival = motion.pulse(&ctx, Some(heard), ARRIVAL_S, cubic_out);
     let fade = 1.0 - motion.pulse(&ctx, Some(heard), FADE_S, cubic_out);
     let accent = if r.unclear { AMBER } else { TEAL };
+    let copied = copied_recently(&ctx, st, LATEST_KEY);
     let look = Panel {
         fill: alpha(accent, 0.07 + 0.08 * arrival),
         stroke: Stroke::new(1.0 + 0.5 * arrival, alpha(accent, 0.55 + 0.45 * arrival)),
@@ -92,29 +95,29 @@ pub fn show(ui: &mut Ui, st: &mut UiState, s: &Shared) -> bool {
             panel(ui, look, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(10.0, 6.0);
                 let wide = ui.available_width() >= WIDE_FROM;
-                header(ui, st, &r, card, is_new, accent, wide);
+                header(ui, &r, is_new, copied, accent, wide);
                 readouts(ui, &r, accent, wide);
             })
             .response
         })
         .inner;
-    let spoken = spoken_text(&r);
-    response
-        .interact(Sense::focusable_noninteractive())
-        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Status, true, spoken.clone()));
+    let response = response.interact(Sense::click());
+    paint_focus(ui.painter(), &response, 4.0);
+    let spoken = format!("{}. {SPOKEN_HINT}", spoken_text(&r));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, spoken.clone()));
+    let code = card.map_or(r.code.as_str(), |c| c.code.as_str());
+    let target = Target {
+        key: LATEST_KEY,
+        code,
+        url: card.and_then(|c| c.url.as_deref()),
+    };
+    actions::menu(&response, st, &target);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand);
     true
 }
 
-/// Tag, title, state and the two buttons: one row when wide, three stacked rows in a narrow column.
-fn header(
-    ui: &mut Ui,
-    st: &mut UiState,
-    r: &Result,
-    card: Option<&Card>,
-    is_new: bool,
-    accent: Color32,
-    wide: bool,
-) {
+/// Tag, title and state: one row when wide, two rows in a narrow column.
+fn header(ui: &mut Ui, r: &Result, is_new: bool, copied: bool, accent: Color32, wide: bool) {
     let tag = if is_new { "NEW" } else { "HEARD AGAIN" };
     let title = |ui: &mut Ui| {
         ui.label(
@@ -125,49 +128,20 @@ fn header(
     };
     let state = |ui: &mut Ui| {
         state_glyph(ui, r.unclear, accent);
-        let text = if r.unclear {
-            "some digits unclear"
+        let (text, color) = if copied {
+            ("code copied", TEAL)
+        } else if r.unclear {
+            ("some digits unclear", DIM)
         } else {
-            "all digits read"
+            ("all digits read", DIM)
         };
-        ui.label(RichText::new(text).font(theme::text(13.0)).color(DIM));
-    };
-    let buttons = |ui: &mut Ui, st: &mut UiState, map_first: bool| {
-        let open_map = |ui: &mut Ui| {
-            if let Some(url) = card
-                .and_then(|c| c.url.as_deref())
-                .filter(|u| is_izurvive_url(u))
-                && button(ui, "Open map", ButtonKind::Primary).clicked()
-            {
-                let _ = open::that(url);
-            }
-        };
-        if map_first {
-            open_map(ui);
-        }
-        let label = if copied_recently(ui.ctx(), st, "latest") {
-            "Copied"
-        } else {
-            "Copy code"
-        };
-        if button(ui, label, ButtonKind::Quiet).clicked() {
-            ui.ctx()
-                .copy_text(card.map_or(r.code.clone(), |c| c.code.clone()));
-            mark_copied(st, "latest");
-        }
-        if !map_first {
-            open_map(ui);
-        }
+        ui.label(RichText::new(text).font(theme::text(13.0)).color(color));
     };
     if wide {
         ui.horizontal(|ui| {
             tag_chip(ui, tag, accent);
             title(ui);
             state(ui);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = GAP;
-                buttons(ui, st, false);
-            });
         });
     } else {
         ui.horizontal(|ui| {
@@ -175,10 +149,6 @@ fn header(
             state(ui);
         });
         title(ui);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = GAP;
-            buttons(ui, st, true);
-        });
     }
 }
 

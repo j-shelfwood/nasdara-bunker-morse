@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Test mode now plays its beeps through the default output on Windows, in real time (it ran silent at double speed), so the broadcast can be heard as well as seen. If no output can be opened it stays silent.
+- Clicking a bunker card (the selected bunker's or the latest result) opens a menu at the pointer with Copy code and Open on web map, as does a right click. The two buttons on the cards are gone, "code copied" shows in the card header instead, and the column gives the room to the bunker tiles, which now show in five columns even in the smallest window.
 - Other sounds hide the beep less. A musical note, hum or voice partial sitting on one of the detector's reference frequencies used to raise its noise estimate until the beep vanished; the loudest three of ten reference bins are now left out. A steady tone at another pitch (the game's own notification jingle at 926 to 947 Hz, a siren, a held note near 1 kHz) no longer counts as a beep. On synthetic transmissions with such sounds mixed in, the share of correctly read digits went from 0 percent to 94 to 98 percent for held notes and tones and from 20 to 74 percent for a siren, and it rose by 0.5 to 9 points with the Windows mix and wind.
 - The right column no longer scrolls. The latest result (or the card of the bunker you pick) sits at the top, all 23 bunkers are tiles below it in map order (number, lock code and how sure the reading is; click a heard one for its card, and the map marks it), and the Morse cheat sheet appears when the window is tall enough. The parts share the column's height and grow with the window.
 - Minimum window size is 900 x 700 (was 760 x 520), so the narrow layout with the bunkers drawer is gone.

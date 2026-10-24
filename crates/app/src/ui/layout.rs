@@ -76,7 +76,7 @@ pub fn centre(area: Rect, window: Vec2) -> Centre {
 
 /// Height of the slot at the top of the column: the latest result, the selected bunker's card or the empty state.
 /// Fixed, so the roster below keeps its size when the slot changes what it shows.
-pub const DOSSIER_H: f32 = 240.0;
+pub const DOSSIER_H: f32 = 204.0;
 /// Height of the "Bunkers heard" caption row.
 pub const ROSTER_HEADER_H: f32 = 22.0;
 /// Space between the parts of the column.
@@ -419,10 +419,10 @@ mod tests {
     }
 
     #[test]
-    fn the_smallest_window_still_gives_the_roster_tiles_of_at_least_30() {
+    fn the_smallest_window_gives_the_roster_five_columns_of_tiles_of_at_least_30() {
         let p = plan_column(at(900.0, 700.0).centre.column, true);
         assert!(tile_h(&p) >= TILE_H_MIN - 0.01, "{}", tile_h(&p));
-        assert_eq!(roster_grid(p.roster.height()), (6, 4));
+        assert_eq!(roster_grid(p.roster.height()), (5, 5));
         assert!(p.guide.is_none(), "no room for the cheat sheet at 900x700");
     }
 
