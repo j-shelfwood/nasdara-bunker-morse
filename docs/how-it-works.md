@@ -106,7 +106,7 @@ Wind alone never produced a false transmission in tests.
 
 ## The minimap outline
 
-The coast and built-up outlines on the minimap are not a map of the island. `tools/nasdara-outline.ts` counts the
-positions of the island's buildings and spawn zones into a coarse grid, blurs it, cuts it at two densities and traces the
+The coast and built-up outlines on the minimap are not a map of the island. The outline was made by counting the
+positions of the island's buildings and spawn zones into a coarse grid, blurring it, cutting it at two densities and tracing the
 edges, so the outline follows where things are built, not the true shoreline. Only the traced loops are kept, in
-`crates/app/src/ui/island.rs`. A test checks that all 23 bunkers fall inside the coast outline.
+`crates/app/src/ui/map/coast.rs` and `built_up.rs`. A test checks that all 23 bunkers fall inside the coast outline.
