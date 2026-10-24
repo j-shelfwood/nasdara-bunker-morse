@@ -16,8 +16,8 @@ pub fn menu(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
     let mut test = s.mode == Mode::Demo;
     if widgets::toggle(ui, &mut test, "Test mode: a simulated broadcast", still)
         .on_hover_text(
-            "Plays a made-up transmission on repeat, to try the window without the game. \
-             Turning it on or off forgets the bunkers heard so far.",
+            "Plays a made-up transmission on repeat, with sound on Windows, to try the window \
+             without the game. Turning it on or off forgets the bunkers heard so far.",
         )
         .changed()
     {
@@ -60,7 +60,7 @@ pub fn menu(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
 pub fn status_chip(s: &Shared, time: f32) -> (String, Color32, f32) {
     let breathe = |speed: f32| (time * speed).fract();
     if s.mode == Mode::Demo {
-        return ("Test mode, not real audio".into(), BLUE, breathe(0.8));
+        return ("Test mode, simulated broadcast".into(), BLUE, breathe(0.8));
     }
     if s.receiving() {
         return ("Receiving a transmission".into(), AMBER, breathe(1.6));

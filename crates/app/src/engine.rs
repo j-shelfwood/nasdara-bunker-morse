@@ -24,7 +24,8 @@ const MIN_BEEP_S: f64 = 0.04;
 const MIN_GAP_S: f64 = 0.06;
 /// A transmission is over after this much silence (the decoder uses the same).
 const QUIET_S: f64 = 5.0;
-const DEMO_SPEED: f64 = 2.0;
+/// Test mode runs in real time where it can be heard (Windows), so the beeps keep their pitch and length.
+const DEMO_SPEED: f64 = if cfg!(windows) { 1.0 } else { 2.0 };
 
 #[derive(Clone, Copy, Debug)]
 pub struct Beep {
@@ -284,6 +285,7 @@ impl Engine {
             Mode::Demo => Capture::demo(
                 synth::demo_transmission(7),
                 DEMO_SPEED,
+                !cfg!(test),
                 self.generation,
                 tx.clone(),
             ),

@@ -4,6 +4,7 @@
 mod demo;
 #[cfg(any(windows, test))]
 mod pacer;
+mod speaker;
 #[cfg(windows)]
 mod win;
 
@@ -180,10 +181,22 @@ impl Capture {
         })
     }
 
-    /// Plays `pcm` into the pipeline at `speed` times real time.
-    pub fn demo(pcm: Vec<i16>, speed: f64, generation: u64, tx: SyncSender<Message>) -> Capture {
+    /// Plays `pcm` into the pipeline at `speed` times real time, and through the speakers when `audible` (which
+    /// only sounds right at speed 1).
+    pub fn demo(
+        pcm: Vec<i16>,
+        speed: f64,
+        audible: bool,
+        generation: u64,
+        tx: SyncSender<Message>,
+    ) -> Capture {
         Self::spawn("demo", Sink::new(generation, tx), move |sink, stop| {
-            demo::play(pcm, speed, sink, stop)
+            let mut speaker = audible.then(speaker::Speaker::open);
+            demo::play(pcm, speed, sink, stop, |chunk| {
+                if let Some(s) = speaker.as_mut() {
+                    s.play(chunk);
+                }
+            })
         })
     }
 
