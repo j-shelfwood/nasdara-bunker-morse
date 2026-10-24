@@ -79,6 +79,8 @@ pub struct UiState {
     card_seen: HashMap<String, (String, String)>,
     pub(super) copied: Option<(String, Instant)>,
     pub(super) selected: Option<String>,
+    /// Map links a menu asked for during the frame, opened once the engine lock is released.
+    pub(super) open_later: Vec<String>,
     /// The cheat sheet digit being played and when it started, in egui time.
     pub(super) guide_play: Option<(char, f64)>,
     on_top_sent: Option<bool>,
@@ -97,6 +99,7 @@ impl UiState {
             card_seen: HashMap::new(),
             copied: None,
             selected: None,
+            open_later: Vec::new(),
             guide_play: None,
             on_top_sent: None,
             min_size_sent: false,

@@ -67,7 +67,10 @@ pub fn draw(ui: &mut Ui, engine: &Handle, st: &mut UiState) {
 
     drop(s);
     // opening a link can be slow: never while the engine waits for the lock
-    for url in to_open {
+    for url in to_open
+        .into_iter()
+        .chain(std::mem::take(&mut st.open_later))
+    {
         let _ = open::that(url);
     }
     if let Some(page) = st.onboarding {

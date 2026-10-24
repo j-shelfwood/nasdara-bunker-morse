@@ -53,7 +53,7 @@ fn rows(ui: &mut Ui, st: &mut UiState, target: &Target) {
     if let Some(url) = map_link(target.url)
         && ui.add(row("Open on web map")).clicked()
     {
-        let _ = open::that(url);
+        st.open_later.push(url.to_string());
         ui.close();
     }
 }
