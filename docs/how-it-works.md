@@ -9,8 +9,10 @@ What was read from the game files, what was measured on a live broadcast, and wh
   client mod cannot read the codes. The audio is the only way to get them.
 - Playback follows the server's `cfgbunkerbroadcast.json`: dot 0.5 s, dash 1.5 s, gap between symbols 0.4 s, 6 s pause
   between bunkers, 3 of the 23 bunkers active, a report every 10 game minutes, broadcast window 17:45 to 06:00.
-- The beep is a tone near 985 Hz with harmonics around 1976, 2842 and 3828 Hz, over a broadband static bed around
-  2.2 to 2.8 kHz (measured from the game's `MorseCode_Short` and `MorseCode_Long` samples).
+- The beep is a tone at 988 Hz (987.8 to 988.5 Hz in the samples) with harmonics around 1976, 2842 and 3828 Hz, over a
+  broadband static bed around 2.2 to 2.8 kHz (measured from the game's `MorseCode_Short` and `MorseCode_Long` samples).
+  The game's `MorseCode_Notification` sample is a different sound: 2.7 s of tone bursts at 926 to 947 Hz over the same
+  static.
 
 ## Measured on a live broadcast (2026-10-23)
 
@@ -27,8 +29,11 @@ What was read from the game files, what was measured on a live broadcast, and wh
 
 The decoder is the `nasdara_decoder` crate. It takes mono 16-bit samples at 44.1 kHz and has no dependencies.
 
-1. `tone`: a Goertzel filter bank around 985 Hz, compared with reference bins that avoid the harmonics and the static
-   bed. The level is the tone's strength over those bins in dB, so broadband noise such as wind raises both and cancels.
+1. `tone`: a Goertzel filter bank around 988 Hz, compared with ten reference bins that avoid the harmonics and the
+   static bed. The level is the tone's strength over the seven quietest of them in dB, so broadband noise such as wind
+   raises both and cancels, and a note or hum sitting in up to three of the bins does not hide the beep. A frame whose
+   spectral peak lies just outside the tone bins (outside roughly 945 to 1025 Hz) is capped at 4 dB: the game's
+   notification jingle, a siren or a held note are not beeps.
 2. `runs`, `bursts`: hysteresis (on at 15 dB, off at 8 dB) groups tone into beeps, and a burst ends after 5 s of silence.
    A burst of fewer than 20 beeps is ignored.
 3. `grid`: a Viterbi search over digit boundaries. Each of the 10 digits is scored as a whole against the tone trace on
@@ -45,6 +50,30 @@ lost), so the window shows a digit only once the next one is due, and shows it d
 
 A lost first dash of a digit looks exactly like a later-starting digit with a missing dot, so a single pass can be wrong.
 That is what the vote over repeats fixes.
+
+## Other sounds
+
+Measured by mixing interferers into synthetic transmissions (beep length and pitch varied, 20 percent of beeps with a
+dropout, 3 percent lost; 40 records each) and comparing the share of the 10 digits read correctly. Interferers: held
+sines, a swept sine, harmonic stacks, white and low-passed noise, the game's `MorseCode_Notification` and
+`MorseCode_StaticNoise` samples, and one 10-second capture of a Windows mix without a beep. The first column is the
+detector before the reference-bin and pitch changes, the second after.
+
+| mixed in | before | after |
+| --- | --- | --- |
+| nothing | 98.2 | 98.5 |
+| Windows mix, 1x / 3x / 5x | 97.5 / 94.2 / 87.0 | 98.0 / 96.2 / 91.2 |
+| notes on reference bins (620 + 1380 Hz) | 0 | 94 to 95 |
+| steady 935 Hz or 1100 Hz tone | 0 | 98.5 |
+| swept tone 800 to 1200 Hz | 20 | 74 |
+| notification jingle, looped over the message | 56 | 59 |
+| voice-like stacks, f0 197 / 120 Hz | 94 / 91 | 96.5 / 96 |
+| low-passed noise (wind) | 80 | 88 |
+
+What still gets through: a sound whose spectral peak sits at 945 to 1025 Hz for longer than a dot (a siren passing
+through, a held 1 kHz note) reads as beeps; anything louder than the beep over the whole message; and a sound that
+overlaps the beeps is added to them. Not checked on a live broadcast: the app logs only the tone level, never audio, so
+the detector cannot be replayed on a real recording.
 
 ## Capture
 
