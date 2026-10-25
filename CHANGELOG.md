@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Quiet games no longer read as nothing. With the game volume turned down, every digit's tone evidence fell below the cut-off and the whole message was dropped, although the decoder had read it right: both live messages checked matched a real bunker's grid exactly. A grid that is exactly one of the 23 bunkers is now kept whatever its evidence, and the lock code digits of weak passes now count towards the vote, so a few repeats of a bunker settle its code where one weak pass showed `?`.
+- The `--log` file records the decoder's raw reading of every message, also an unreadable one, and the trace file records the audio level per frame, so a bad message can be told apart from a quiet game.
+
 ## 0.3.0 (2026-10-25)
 
 - Test mode now plays its beeps through the default output on Windows, in real time (it ran silent at double speed), so the broadcast can be heard as well as seen. If no output can be opened it stays silent.

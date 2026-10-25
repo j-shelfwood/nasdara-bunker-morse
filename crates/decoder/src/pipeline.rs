@@ -1,7 +1,7 @@
 //! PCM (s16le mono 44.1 kHz) in, decoded bursts out.
 
-use crate::bunkers::snap_grid;
-use crate::bursts::{AssemblerOptions, BunkerRecord, Burst, BurstAssembler, Trace};
+use crate::bunkers::{Snap, snap_grid};
+use crate::bursts::{AssemblerOptions, BunkerRecord, Burst, BurstAssembler, Guess, Trace};
 use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_grid, decode_prefix, longest_digit_s};
 use crate::js_round;
 use crate::runs::{RunOptions, RunTracker};
@@ -104,6 +104,8 @@ pub struct Pipeline {
     live_run: usize,
     /// Rounded tone levels of the last `TRACE_KEEP_S` seconds: the burst decoder works on these, not on beep counts.
     levels: Vec<i8>,
+    /// Broadband level (dBFS) of the same frames, for the debug log only.
+    rms_db: Vec<i8>,
     levels_end: f64,
     frames_total: u64,
     /// Absolute frame number of `levels[0]`.
@@ -152,6 +154,7 @@ impl Pipeline {
             },
             live_run: 0,
             levels: Vec::new(),
+            rms_db: Vec::new(),
             levels_end: 0.0,
             frames_total: 0,
             levels_base: 0,
@@ -198,6 +201,7 @@ impl Pipeline {
             self.live = Live { on, db: f.db };
             self.levels
                 .push(js_round(f64::from(f.db)).clamp(-30.0, 60.0) as i8);
+            self.rms_db.push(rms_dbfs(f.rms));
             self.levels_end = f.t;
             self.track_open(on);
             self.frames_total += 1;
@@ -206,6 +210,7 @@ impl Pipeline {
         if self.levels.len() > 2 * keep {
             let cut = self.levels.len() - keep;
             self.levels.drain(..cut);
+            self.rms_db.drain(..cut);
             self.levels_base += cut as u64;
         }
         let runs = self.runs.push(&frames);
@@ -360,41 +365,67 @@ impl Pipeline {
         let trace = Trace {
             t0: first + from as f64 * FRAME_SECONDS,
             db: self.levels[from..to].to_vec(),
+            rms_db: self.rms_db[from..to].to_vec(),
         };
-        let Some(grid) = decode_grid(&trace.db, DIGITS_PER_RECORD, &SHIPPED_TIMING) else {
-            b.note = Some("too short for a whole message".into());
-            b.trace = Some(trace);
-            return b;
-        };
-        let digits: Vec<char> = grid
-            .digits
-            .iter()
-            .zip(&grid.support)
-            .map(|(&d, &s)| if s >= MIN_SUPPORT { d } else { '?' })
-            .collect();
-        let readable = digits.iter().filter(|&&d| d != '?').count();
-        if readable < MIN_READABLE {
-            b.note = Some(format!(
-                "only {readable} of {DIGITS_PER_RECORD} digits readable"
-            ));
-            b.trace = Some(trace);
-            return b;
+        let (guess, record) = read_trace(&trace);
+        b.guess = guess;
+        match record {
+            Ok(r) => b.records = vec![r],
+            Err(note) => b.note = Some(note),
         }
-        let g: String = digits.iter().take(6).collect();
-        let record = BunkerRecord {
-            snap: snap_grid(&g),
-            code: digits.iter().skip(6).collect(),
-            grid: g,
-            support: grid.support.iter().map(|&s| round2(s)).collect(),
-            margins: grid.margins.clone(),
-            start: trace.t0 + grid.start,
-            digit_starts: grid.starts.iter().map(|s| trace.t0 + s).collect(),
-            digits,
-        };
-        b.records = vec![record];
         b.trace = Some(trace);
         b
     }
+}
+
+fn rms_dbfs(rms: f32) -> i8 {
+    (20.0 * f64::from(rms).max(1e-5).log10())
+        .round()
+        .clamp(-100.0, 0.0) as i8
+}
+
+/// Reads one burst's tone trace: the raw grid reading (when the trace is long enough for one) and the record built
+/// from it, or the reason there is none.
+///
+/// A digit below `MIN_SUPPORT` shows as '?', except in a grid that is exactly one of the 23 bunkers: six digits
+/// matching a real cell by chance is about 2 in 100 000, so such a grid is a checksum that outweighs the weak tone
+/// evidence of its digits (a quiet or noisy game gave supports of 0.04 to 0.28 on grids that were all right).
+pub fn read_trace(trace: &Trace) -> (Option<Guess>, Result<BunkerRecord, String>) {
+    let Some(grid) = decode_grid(&trace.db, DIGITS_PER_RECORD, &SHIPPED_TIMING) else {
+        return (None, Err("too short for a whole message".into()));
+    };
+    let guess = Guess {
+        digits: grid.digits.iter().collect(),
+        support: grid.support.iter().map(|&s| round2(s)).collect(),
+    };
+    let mut digits: Vec<char> = grid
+        .digits
+        .iter()
+        .zip(&grid.support)
+        .map(|(&d, &s)| if s >= MIN_SUPPORT { d } else { '?' })
+        .collect();
+    let raw_grid: String = grid.digits.iter().take(6).collect();
+    if matches!(snap_grid(&raw_grid), Snap::Exact(_)) {
+        digits[..6].copy_from_slice(&grid.digits[..6]);
+    }
+    let readable = digits.iter().filter(|&&d| d != '?').count();
+    if readable < MIN_READABLE {
+        let note = format!("only {readable} of {DIGITS_PER_RECORD} digits readable");
+        return (Some(guess), Err(note));
+    }
+    let g: String = digits.iter().take(6).collect();
+    let record = BunkerRecord {
+        snap: snap_grid(&g),
+        code: digits.iter().skip(6).collect(),
+        grid: g,
+        raw: grid.digits.clone(),
+        support: grid.support.iter().map(|&s| round2(s)).collect(),
+        margins: grid.margins.clone(),
+        start: trace.t0 + grid.start,
+        digit_starts: grid.starts.iter().map(|s| trace.t0 + s).collect(),
+        digits,
+    };
+    (Some(guess), Ok(record))
 }
 
 /// `Number(s.toFixed(2))`

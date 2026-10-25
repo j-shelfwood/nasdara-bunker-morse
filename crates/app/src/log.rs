@@ -37,6 +37,10 @@ impl DebugLog {
                 })
             })
             .collect();
+        let guess = b
+            .guess
+            .as_ref()
+            .map(|g| serde_json::json!({ "digits": g.digits, "support": g.support }));
         let line = serde_json::json!({
             "at": unix_seconds(),
             "elements": b.elements,
@@ -44,6 +48,7 @@ impl DebugLog {
             "note": b.note,
             "shown": shown,
             "records": records,
+            "guess": guess,
             "beeps": b.beeps.iter().map(|x| [round2(x.start), round2(x.dur)]).collect::<Vec<_>>(),
         });
         out.push(LogLine {
@@ -51,7 +56,7 @@ impl DebugLog {
             text: line.to_string(),
         });
         if let (true, Some(trace)) = (self.trace, &b.trace) {
-            let t = serde_json::json!({ "at": unix_seconds(), "t0": trace.t0, "db": trace.db });
+            let t = serde_json::json!({ "at": unix_seconds(), "t0": trace.t0, "db": trace.db, "rms": trace.rms_db });
             let mut name = self.path.clone().into_os_string();
             name.push(".trace.jsonl");
             out.push(LogLine {

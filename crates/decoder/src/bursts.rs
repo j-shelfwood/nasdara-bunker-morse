@@ -5,6 +5,8 @@ use crate::runs::Run;
 pub struct BunkerRecord {
     /// Ten digits, '?' where the tone evidence did not decide the digit.
     pub digits: Vec<char>,
+    /// Ten digits as the grid decoder read them, never '?': the ledger votes with these, weighted by `support`.
+    pub raw: Vec<char>,
     /// Per digit, 1 = a clean beep pattern; the digit is '?' below the pipeline's threshold.
     pub support: Vec<f32>,
     /// Per digit, how much better the chosen digit explains the trace than the runner-up.
@@ -29,6 +31,16 @@ pub struct Beep {
 pub struct Trace {
     pub t0: f64,
     pub db: Vec<i8>,
+    /// Broadband level per frame in dBFS (rounded, clamped to -100..0), same frames as `db`: tells a quiet game from
+    /// a weak beep. Empty when the trace is replayed from a fixture.
+    pub rms_db: Vec<i8>,
+}
+
+/// What the grid decoder read from a burst before any digit was judged unreadable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Guess {
+    pub digits: String,
+    pub support: Vec<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +56,8 @@ pub struct Burst {
     /// First beep start and last beep end, in stream seconds.
     pub span: (f64, f64),
     pub trace: Option<Trace>,
+    /// The raw grid reading, set whenever one was made, also when no record came of it.
+    pub guess: Option<Guess>,
     pub beeps: Vec<Beep>,
     /// Silence before the first beep.
     pub first_gap: f64,
@@ -175,6 +189,7 @@ impl BurstAssembler {
             ignored,
             span: (first.start, last.start + last.dur),
             trace: None,
+            guess: None,
             beeps,
             first_gap: self.first_gap,
         })

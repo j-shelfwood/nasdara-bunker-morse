@@ -25,6 +25,9 @@ const CONFIDENT: f64 = 0.6;
 /// Most distinct unsnapped records kept; beyond it the least recently heard is dropped.
 const MAX_LOOSE: usize = 256;
 const ESTABLISHED: f64 = 1.2;
+/// Weight a digit needs before it is shown: one pass at the pipeline's `MIN_SUPPORT`, or several weaker passes that
+/// agree. Below it the position stays '?'.
+const SHOWN: f64 = 0.35;
 
 #[derive(Debug, Clone, Default)]
 struct Votes {
@@ -74,7 +77,9 @@ impl BunkerLedger {
                 corrected: false,
             };
         };
-        let heard = r.digits.get(GRID_DIGITS..).unwrap_or(&[]);
+        // Weak passes vote too: a digit the pipeline showed as '?' still carries its raw reading.
+        let digits = if r.raw.is_empty() { &r.digits } else { &r.raw };
+        let heard = digits.get(GRID_DIGITS..).unwrap_or(&[]);
         let support = r.support.get(GRID_DIGITS..).unwrap_or(&[]);
         let contradicted = self
             .votes
@@ -86,7 +91,7 @@ impl BunkerLedger {
         let v = self.votes.entry(bunker.index).or_default();
         for (i, &d) in heard.iter().enumerate().take(CODE_DIGITS) {
             if let (Some(n), Some(&s)) = (d.to_digit(10), support.get(i)) {
-                v.code[i][n as usize] += widen(s);
+                v.code[i][n as usize] += widen(s).max(0.0);
             }
         }
         v.count += 1;
@@ -134,7 +139,7 @@ fn argmax(w: &[f64]) -> usize {
 
 fn consensus(w: &[f64; 10]) -> char {
     let top = argmax(w);
-    if w[top] <= 0.0 {
+    if w[top] < SHOWN {
         return '?';
     }
     let second = w

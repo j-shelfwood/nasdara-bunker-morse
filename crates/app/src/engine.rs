@@ -669,6 +669,7 @@ mod tests {
             ignored: None,
             span: (1.0, 3.0),
             trace: None,
+            guess: None,
             beeps: Vec::new(),
             first_gap: 0.5,
         }

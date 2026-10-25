@@ -315,6 +315,7 @@ fn record(bunker: usize, digits: &str, support: f32) -> BunkerRecord {
             .chars()
             .map(|d| if d == '?' { 0.0 } else { support })
             .collect(),
+        raw: vec![],
         margins: vec![],
         grid: digits[..6].into(),
         code: digits[6..].into(),

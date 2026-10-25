@@ -3,8 +3,9 @@
 //! digits 1.89 s apart where 2.3 s is nominal) shifted every later digit off its pattern.
 
 use nasdara_decoder::bunkers::{SnapKind, snap_grid};
+use nasdara_decoder::bursts::Trace;
 use nasdara_decoder::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_grid};
-use nasdara_decoder::pipeline::MIN_SUPPORT;
+use nasdara_decoder::pipeline::{MIN_SUPPORT, read_trace};
 
 const FIXTURE: &str = include_str!("fixtures/live-traces-2026-10-23.txt");
 
@@ -50,5 +51,33 @@ fn in_game_records_read_their_bunker_without_a_wrong_digit() {
         let snap = snap_grid(&grid);
         assert_ne!(snap.kind(), SnapKind::None, "{grid} did not snap");
         assert_eq!(snap.bunker().map(|b| b.index), Some(bunker), "{text}");
+    }
+}
+
+const QUIET: &str = include_str!("fixtures/live-traces-2026-10-26.txt");
+
+/// Two records heard with the game volume turned down: every digit's support fell below `MIN_SUPPORT`, so the
+/// pipeline reported nothing, yet the decoder had read both grids right. A grid that is exactly a real bunker now
+/// stands without the support.
+#[test]
+fn quiet_game_records_report_their_exact_grid() {
+    let lines: Vec<&str> = QUIET.lines().filter(|l| !l.starts_with('#')).collect();
+    assert_eq!(lines.len(), 2);
+    for (line, bunker) in lines.iter().zip([20, 4]) {
+        let (truth, trace) = line.split_once(';').expect("digits;trace");
+        let trace = Trace {
+            t0: 0.0,
+            db: levels(trace),
+            rms_db: Vec::new(),
+        };
+        let (guess, record) = read_trace(&trace);
+        let guess = guess.expect("a reading was made");
+        assert!(guess.support.iter().all(|&s| s < MIN_SUPPORT), "{guess:?}");
+        let record = record.expect("an exact grid makes a record");
+        assert_eq!(record.grid, truth[..6], "{guess:?}");
+        assert_eq!(record.snap.kind(), SnapKind::Exact);
+        assert_eq!(record.snap.bunker().map(|b| b.index), Some(bunker));
+        assert_eq!(record.code, "????");
+        assert_eq!(record.raw.iter().collect::<String>(), guess.digits);
     }
 }
