@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-25)
 
 - Test mode now plays its beeps through the default output on Windows, in real time (it ran silent at double speed), so the broadcast can be heard as well as seen. If no output can be opened it stays silent.
 - Clicking a bunker card (the selected bunker's or the latest result) opens a menu at the pointer with Copy code and Open on web map, as does a right click. The two buttons on the cards are gone, "code copied" shows in the card header instead, and the column gives the room to the bunker tiles, which now show in five columns even in the smallest window.
