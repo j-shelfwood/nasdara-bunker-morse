@@ -1,15 +1,19 @@
 # Bunker Morse
 
 A Windows app that reads the Nasdara bunker broadcast in DayZ for you. It listens to the game's audio, turns the Morse
-beeps into digits, and shows each bunker's map grid and lock code on screen, with a button that opens the bunker on
-[iZurvive](https://www.izurvive.com/nasdara/).
+beeps into digits, and shows each bunker's map grid and lock code on screen. A click on a card copies the lock code or
+opens the bunker on [iZurvive](https://www.izurvive.com/nasdara/).
 
 It was made so that deaf and hard-of-hearing players can use the bunker broadcast. It also helps anyone who finds Morse
 by ear hard.
 
-![Test mode: a message arrives digit by digit, then the bunker's card appears](docs/images/demo.gif)
+![Test mode: a message arrives digit by digit, the bunker's tile fills in, and a click on its card opens the copy and map menu](docs/images/demo.gif)
 
-*The animation is test mode, which plays synthetic beeps, shown at three times the speed. The screenshot further down is a rendered test scene of a finished message with the hover card of one bunker open. No game audio is used or included in this repository.*
+*The animation is test mode, which plays synthetic beeps: the broadcast at about three times the speed, then a click on
+the finished bunker's tile and card in real time ([full-size video](docs/images/demo.mov)). The screenshot further down
+is a rendered test scene of a finished message with the hover card of one bunker open. Both were rendered on a Mac with
+the built-in fonts, so the lettering differs a little from the Windows app. No game audio is used or included in this
+repository.*
 
 Unofficial fan project, not affiliated with Bohemia Interactive.
 
@@ -21,7 +25,8 @@ Unofficial fan project, not affiliated with Bohemia Interactive.
 2. Start DayZ, then start the app. A short walkthrough opens the first time.
 3. In the game, hold a powered radio tuned to the bunker frequency during the broadcast window, 17:45 to 06:00 game time.
 4. Watch the window. The ten digit slots fill in as the message arrives (six for the map grid, four for the lock code).
-   Digits shown dimmed are tentative. When the message is complete a card appears for that bunker.
+   Digits shown dimmed are tentative. When the message is complete a card appears for that bunker; click it for a menu to
+   copy the code or open the bunker on the web map.
 
 Three of the 23 bunkers transmit at a time, one after the other, about 90 seconds each, and the cycle repeats. Every
 repeat fills in digits the previous one missed, so a card shows `?` for a digit until it has been heard clearly.
@@ -54,7 +59,7 @@ exe is built by GitHub Actions from the tagged source, and each release carries 
 ## Privacy and the game's anti-cheat
 
 - Audio is analysed in memory and never stored or sent anywhere. The app makes no network connections. The only thing
-  that leaves it is the iZurvive link, which opens in your browser when you press the button.
+  that leaves it is the iZurvive link, which opens in your browser when you choose Open on web map from a card's menu.
 - Capture uses the Windows audio API for per-process loopback (the same API screen recorders use). The app does not read
   DayZ's memory, inject code or touch the game's files. It has not been reviewed by BattlEye or Bohemia, so use it at your own risk.
 - `--log <file>` (optional, off by default) writes one line per decoded message with beep timings and digits, no audio.

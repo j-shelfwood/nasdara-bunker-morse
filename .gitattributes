@@ -2,3 +2,5 @@
 *.png binary
 *.ico binary
 crates/decoder/tests/fixtures/*.txt text eol=lf
+*.gif binary
+*.mov binary

@@ -3,7 +3,9 @@
 //! `--result ... --hover N` also renders the result with the hover card of bunker N (1..23) open.
 //! `--select N` (with `--result`) also renders the result with bunker N's roster tile clicked, so its card is open.
 //! `--film SECONDS [--fps N]` plays the demo for that long and writes `film/NNNN.png` frames (default 5 per second), for
-//! assembling the README animation with ffmpeg.
+//! assembling the README animation with ffmpeg. `--click-card N` (with `--film`) then clicks bunker N's roster
+//! tile and its card, presses Copy code in the menu, and writes those frames, in real time at 15 a second, to
+//! `film-click/NNNN.png`.
 //! `--menu` (with no stream seconds) also renders the options menu open.
 //! `--size 760x520` renders at another window size in points (default 1060x800); file names then carry the size.
 //! Set NASDARA_FONT_DIR to a folder with segoeui.ttf, segoeuib.ttf and bahnschrift.ttf to preview with the Windows fonts.
@@ -28,6 +30,7 @@ fn main() {
     let (mut reduce_motion, mut twice, mut menu) = (false, false, false);
     let (mut hover, mut select): (Option<usize>, Option<usize>) = (None, None);
     let (mut film, mut fps): (Option<f64>, f64) = (None, 5.0);
+    let mut click_card: Option<usize> = None;
     while let Some(a) = args.next() {
         if a == "--size" {
             let parsed = args.next().and_then(|v| {
@@ -52,6 +55,12 @@ fn main() {
                 args.next()
                     .and_then(|v| v.parse().ok())
                     .expect("--film needs seconds, e.g. 100"),
+            );
+        } else if a == "--click-card" {
+            click_card = Some(
+                args.next()
+                    .and_then(|v| v.parse().ok())
+                    .expect("--click-card needs a bunker number, e.g. 1"),
             );
         } else if a == "--fps" {
             fps = args
@@ -162,6 +171,33 @@ fn main() {
             n += 1;
         }
         eprintln!("wrote {n} frames to {}", dir.display());
+        if let Some(n) = click_card {
+            let tile = format!("Roster tile, bunker {n},");
+            let dir = out.join("film-click");
+            std::fs::create_dir_all(&dir).unwrap();
+            // the harness steps 16 ms at a time: this many steps make one frame of real time at 15 frames a second
+            let (tail_fps, steps) = (15.0, 4);
+            let mut frames = 0;
+            let mut hold = |harness: &mut Harness<'_, (Handle, UiState)>, seconds: f64| {
+                for _ in 0..(seconds * tail_fps).round() as usize {
+                    harness.run_steps(steps);
+                    save(harness, &dir.join(format!("{frames:04}.png")));
+                    frames += 1;
+                }
+            };
+            hold(&mut harness, 0.6);
+            harness.get_by_label_contains(&tile).click();
+            hold(&mut harness, 1.0);
+            harness
+                .query_all_by_label_contains("Opens a menu to copy the code")
+                .next()
+                .expect("a result card to click")
+                .click();
+            hold(&mut harness, 1.6);
+            harness.get_by_label_contains("Copy code").click();
+            hold(&mut harness, 1.6);
+            eprintln!("wrote {frames} frames to {}", dir.display());
+        }
         return;
     }
     if marks.is_empty() {
