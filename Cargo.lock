@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "nasdara-bunker-morse"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "eframe",
  "egui",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "nasdara_decoder"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ndk"
