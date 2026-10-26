@@ -1,12 +1,18 @@
 //! PCM (s16le mono 44.1 kHz) in, decoded bursts out.
 
-use crate::bunkers::{Snap, snap_grid};
-use crate::bursts::{AssemblerOptions, BunkerRecord, Burst, BurstAssembler, Guess, Trace};
-use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_grid, decode_prefix, longest_digit_s};
+mod preview;
+mod record;
+
+pub use preview::{Preview, PreviewDigit};
+pub use record::{MIN_SUPPORT, read_trace};
+
+use crate::bursts::{AssemblerOptions, Burst, BurstAssembler, Trace};
 use crate::js_round;
 use crate::runs::{RunOptions, RunTracker};
 use crate::tone::{FRAME_SECONDS, ToneDetector, ToneFrame};
-use std::sync::{Mutex, MutexGuard};
+use preview::{PREVIEW_HOLD_S, PreviewCache};
+use record::rms_dbfs;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Live {
@@ -18,47 +24,6 @@ pub struct Live {
 const PUSH_STEP_SAMPLES: usize = 44_100;
 const TRACE_KEEP_S: f64 = 150.0;
 const TRACE_MARGIN_S: f64 = 2.0;
-/// Below this a digit is reported as '?': the beeps that would decide it were not (all) heard.
-pub const MIN_SUPPORT: f32 = 0.35;
-/// A record with fewer readable digits than this is not reported (a partial capture).
-const MIN_READABLE: usize = 6;
-/// A preview needs this many tone runs in the open burst; fewer is a stray tone.
-const PREVIEW_MIN_RUNS: usize = 6;
-/// Recompute the preview only after this many new frames.
-/// The decoder's jitter allowance: a digit counts as settled only when the trace extends this far past its window.
-const SETTLE_S: f64 = 0.12;
-/// A closed burst's preview is dropped after this long even if its burst never arrives.
-const PREVIEW_HOLD_S: f64 = 3.0;
-const PREVIEW_REFRESH_FRAMES: u64 = 60;
-/// The preview decodes at most this many seconds of the open burst (the newest): a message is about 90 s.
-const PREVIEW_MAX_S: f64 = 100.0;
-
-/// One digit of a live preview. A digit whose last symbol window is still open (`settled == false`) may change on the
-/// next preview: a shorter look-alike that fits the audio so far can take its place until the window has passed.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreviewDigit {
-    /// '?' when the support is below `MIN_SUPPORT`.
-    pub ch: char,
-    pub support: f32,
-    pub margin: f32,
-    /// Stream seconds of the digit start.
-    pub start: f64,
-    /// Stream seconds at which the digit's last symbol window ended.
-    pub window_end: f64,
-    /// False while the digit may still change in later previews: only the trailing digit can be unsettled, and it
-    /// is until the trace extends past `window_end` plus the jitter allowance (`SETTLE_S`) and past the longest
-    /// digit's length from the digit's start, because a shorter look-alike fits the audio first (4821: the fifth digit
-    /// reads 5, 6, 4, 7, 8, 9 before the real 0). A UI should not present an unsettled digit as read.
-    pub settled: bool,
-}
-
-/// Digits read from the transmission in progress. Digits with `settled == false` (only ever the last) may change.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Preview {
-    /// Stream seconds of the first digit.
-    pub start: f64,
-    pub digits: Vec<PreviewDigit>,
-}
 
 #[derive(Debug, Default)]
 pub struct PushResult {
@@ -85,13 +50,6 @@ struct Closing {
     bursts_at_close: u64,
     /// The burst has been emitted: the preview goes at the next push.
     released: bool,
-}
-
-#[derive(Debug)]
-struct PreviewCache {
-    id: u64,
-    at_frame: u64,
-    value: Option<Preview>,
 }
 
 pub struct Pipeline {
@@ -125,14 +83,6 @@ impl Default for Pipeline {
 
 fn keep_frames() -> usize {
     (TRACE_KEEP_S / FRAME_SECONDS).ceil() as usize
-}
-
-fn preview_max_frames() -> usize {
-    (PREVIEW_MAX_S / FRAME_SECONDS).ceil() as usize
-}
-
-fn unpoison<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Pipeline {
@@ -281,65 +231,6 @@ impl Pipeline {
         }
     }
 
-    /// Digits read from the transmission in progress so far. `None` outside a transmission or before it has
-    /// `PREVIEW_MIN_RUNS` tone runs. After the transmission closes the last preview is kept until the push after
-    /// its `Burst` was emitted. Cached: recomputed after `PREVIEW_REFRESH_FRAMES` new frames.
-    pub fn preview(&self) -> Option<Preview> {
-        let open = self
-            .open
-            .as_ref()
-            .or(self.closing.as_ref().map(|c| &c.open))
-            .filter(|o| o.on_runs >= PREVIEW_MIN_RUNS)?;
-        let mut cache = unpoison(&self.cache);
-        if let Some(c) = cache.as_ref()
-            && c.id == open.id
-            && self.frames_total - c.at_frame < PREVIEW_REFRESH_FRAMES
-        {
-            return c.value.clone();
-        }
-        let value = self.compute_preview(open);
-        *cache = Some(PreviewCache {
-            id: open.id,
-            at_frame: self.frames_total,
-            value: value.clone(),
-        });
-        value
-    }
-
-    fn compute_preview(&self, open: &OpenBurst) -> Option<Preview> {
-        let margin = (TRACE_MARGIN_S / FRAME_SECONDS).ceil() as usize;
-        let first = open.first_frame.saturating_sub(self.levels_base) as usize;
-        let from = first
-            .saturating_sub(margin)
-            .max(self.levels.len().saturating_sub(preview_max_frames()));
-        let trace = self.levels.get(from..)?;
-        let t0 = self.level_time(from);
-        let g = decode_prefix(trace, &SHIPPED_TIMING, DIGITS_PER_RECORD)?;
-        let trace_end = self.levels_end;
-        let longest = longest_digit_s(&SHIPPED_TIMING);
-        let n = g.digits.len();
-        let digits = (0..n)
-            .map(|i| PreviewDigit {
-                ch: if g.support[i] >= MIN_SUPPORT {
-                    g.digits[i]
-                } else {
-                    '?'
-                },
-                support: g.support[i],
-                margin: g.margins[i],
-                start: t0 + g.starts[i],
-                window_end: t0 + g.ends[i],
-                settled: i + 1 < n
-                    || (t0 + g.ends[i] + SETTLE_S <= trace_end
-                        && t0 + g.starts[i] + longest + SETTLE_S <= trace_end),
-            })
-            .collect();
-        Some(Preview {
-            start: t0 + g.start,
-            digits,
-        })
-    }
-
     /// Stream seconds of the level at index `i` of `levels`.
     fn level_time(&self, i: usize) -> f64 {
         let first = self.levels_end - (self.levels.len() as f64 - 1.0) * FRAME_SECONDS;
@@ -375,75 +266,5 @@ impl Pipeline {
         }
         b.trace = Some(trace);
         b
-    }
-}
-
-fn rms_dbfs(rms: f32) -> i8 {
-    (20.0 * f64::from(rms).max(1e-5).log10())
-        .round()
-        .clamp(-100.0, 0.0) as i8
-}
-
-/// Reads one burst's tone trace: the raw grid reading (when the trace is long enough for one) and the record built
-/// from it, or the reason there is none.
-///
-/// A digit below `MIN_SUPPORT` shows as '?', except in a grid that is exactly one of the 23 bunkers: six digits
-/// matching a real cell by chance is about 2 in 100 000, so such a grid is a checksum that outweighs the weak tone
-/// evidence of its digits (a quiet or noisy game gave supports of 0.04 to 0.28 on grids that were all right).
-pub fn read_trace(trace: &Trace) -> (Option<Guess>, Result<BunkerRecord, String>) {
-    let Some(grid) = decode_grid(&trace.db, DIGITS_PER_RECORD, &SHIPPED_TIMING) else {
-        return (None, Err("too short for a whole message".into()));
-    };
-    let guess = Guess {
-        digits: grid.digits.iter().collect(),
-        support: grid.support.iter().map(|&s| round2(s)).collect(),
-    };
-    let mut digits: Vec<char> = grid
-        .digits
-        .iter()
-        .zip(&grid.support)
-        .map(|(&d, &s)| if s >= MIN_SUPPORT { d } else { '?' })
-        .collect();
-    let raw_grid: String = grid.digits.iter().take(6).collect();
-    if matches!(snap_grid(&raw_grid), Snap::Exact(_)) {
-        digits[..6].copy_from_slice(&grid.digits[..6]);
-    }
-    let readable = digits.iter().filter(|&&d| d != '?').count();
-    if readable < MIN_READABLE {
-        let note = format!("only {readable} of {DIGITS_PER_RECORD} digits readable");
-        return (Some(guess), Err(note));
-    }
-    let g: String = digits.iter().take(6).collect();
-    let record = BunkerRecord {
-        snap: snap_grid(&g),
-        code: digits.iter().skip(6).collect(),
-        grid: g,
-        raw: grid.digits.clone(),
-        support: grid.support.iter().map(|&s| round2(s)).collect(),
-        margins: grid.margins.clone(),
-        start: trace.t0 + grid.start,
-        digit_starts: grid.starts.iter().map(|s| trace.t0 + s).collect(),
-        digits,
-    };
-    (Some(guess), Ok(record))
-}
-
-/// `Number(s.toFixed(2))`
-/// Never returns negative zero.
-fn round2(s: f32) -> f32 {
-    let r: f32 = format!("{s:.2}").parse().unwrap_or(s);
-    if r == 0.0 { 0.0 } else { r }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::round2;
-
-    #[test]
-    fn round2_never_returns_negative_zero() {
-        assert_eq!(round2(-0.001).to_bits(), 0.0f32.to_bits());
-        assert_eq!(round2(-0.0).to_bits(), 0.0f32.to_bits());
-        assert_eq!(round2(1.0549), 1.05);
-        assert_eq!(round2(-0.4), -0.4);
     }
 }
