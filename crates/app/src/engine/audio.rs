@@ -164,7 +164,7 @@ impl Engine {
                 }
                 s.finished = Some(Finished {
                     digits: r.digits.clone(),
-                    support: r.support.clone(),
+                    support: painted_support(r),
                     starts: r.digit_starts.clone(),
                     heard: Instant::now(),
                     bunker: e.bunker.map(|b| b.index),
@@ -190,4 +190,14 @@ fn accepted(r: &BunkerRecord, system: bool) -> bool {
     // system-wide audio holds music and voice: only a message whose grid is a real bunker counts
     let known = r.snap.kind() != SnapKind::None;
     known || (!system && r.grid.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Support as the digit bar paints it: a grid that is exactly one of the 23 bunkers is certain whatever its tone
+/// evidence, so its six digits are not shown as weak.
+pub(super) fn painted_support(r: &BunkerRecord) -> Vec<f32> {
+    let mut support = r.support.clone();
+    if r.snap.kind() == SnapKind::Exact {
+        support.iter_mut().take(6).for_each(|s| *s = 1.0);
+    }
+    support
 }

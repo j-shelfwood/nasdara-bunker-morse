@@ -1,9 +1,11 @@
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
-use nasdara_decoder::bursts::Burst;
+use nasdara_decoder::bunkers::{bunkers, snap_grid};
+use nasdara_decoder::bursts::{BunkerRecord, Burst};
 use nasdara_decoder::synth;
 
+use super::audio::painted_support;
 use super::state::MAX_NOTES;
 use super::worker::{AliveGuard, Engine};
 use super::{Beep, Command, Mode, Shared};
@@ -221,4 +223,32 @@ fn a_dying_engine_thread_clears_engine_alive() {
             .unwrap_or_else(|p| p.into_inner())
             .engine_alive
     );
+}
+
+fn record_with(grid: &str, support: f32) -> BunkerRecord {
+    let digits: Vec<char> = format!("{grid}????").chars().collect();
+    BunkerRecord {
+        support: vec![support; 10],
+        raw: digits.clone(),
+        digits,
+        margins: vec![],
+        code: "????".into(),
+        snap: snap_grid(grid),
+        grid: grid.into(),
+        start: 0.0,
+        digit_starts: vec![],
+    }
+}
+
+#[test]
+fn a_grid_confirmed_by_the_bunker_list_is_painted_as_certain() {
+    let painted = painted_support(&record_with(&bunkers()[19].grid, 0.1));
+    assert_eq!(&painted[..6], &[1.0; 6]);
+    assert_eq!(&painted[6..], &[0.1; 4]);
+}
+
+#[test]
+fn a_grid_that_matches_no_bunker_keeps_its_own_support() {
+    let painted = painted_support(&record_with("123456", 0.1));
+    assert_eq!(painted, vec![0.1; 10]);
 }

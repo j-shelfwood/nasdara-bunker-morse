@@ -85,6 +85,10 @@ fn weak_passes_accumulate_until_a_digit_shows() {
     assert_eq!(l.add(&weak('3', 0.2)).code.chars().next(), Some('?'));
     let mut l = BunkerLedger::new();
     assert_eq!(l.add(&weak('7', -0.3)).code.chars().next(), Some('?'));
+    // a pass with no tone evidence takes nothing away from a clean one
+    let mut l = BunkerLedger::new();
+    l.add(&weak('7', 0.5));
+    assert_eq!(l.add(&weak('7', -0.3)).code.chars().next(), Some('7'));
 }
 
 #[test]

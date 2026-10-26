@@ -1,4 +1,4 @@
-use super::record::MIN_SUPPORT;
+use super::record::shown_digits;
 use super::{OpenBurst, Pipeline, TRACE_MARGIN_S};
 use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_prefix, longest_digit_s};
 use crate::tone::FRAME_SECONDS;
@@ -19,7 +19,7 @@ const PREVIEW_MAX_S: f64 = 100.0;
 /// next preview: a shorter look-alike that fits the audio so far can take its place until the window has passed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewDigit {
-    /// '?' when the support is below `MIN_SUPPORT`.
+    /// '?' when the support is below `MIN_SUPPORT`, except in a grid that is exactly a real bunker (`shown_digits`).
     pub ch: char,
     pub support: f32,
     pub margin: f32,
@@ -95,13 +95,10 @@ impl Pipeline {
         let trace_end = self.levels_end;
         let longest = longest_digit_s(&SHIPPED_TIMING);
         let n = g.digits.len();
+        let shown = shown_digits(&g.digits, &g.support);
         let digits = (0..n)
             .map(|i| PreviewDigit {
-                ch: if g.support[i] >= MIN_SUPPORT {
-                    g.digits[i]
-                } else {
-                    '?'
-                },
+                ch: shown[i],
                 support: g.support[i],
                 margin: g.margins[i],
                 start: t0 + g.starts[i],
