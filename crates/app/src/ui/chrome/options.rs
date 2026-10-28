@@ -14,13 +14,17 @@ pub fn menu(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
     let still = st.settings.reduce_motion;
     widgets::toggle(ui, &mut st.settings.show_guide, "Morse cheat sheet", still);
     let mut test = s.mode == Mode::Demo;
-    if widgets::toggle(ui, &mut test, "Test mode: a simulated broadcast", still)
+    let test_toggle = ui
+        .add_enabled_ui(!s.frozen, |ui| {
+            widgets::toggle(ui, &mut test, "Test mode: a simulated broadcast", still)
+        })
+        .inner
         .on_hover_text(
             "Plays a made-up transmission on repeat, with sound on Windows, to try the window \
              without the game. Turning it on or off forgets the bunkers heard so far.",
         )
-        .changed()
-    {
+        .on_disabled_hover_text("Unfreeze the bunkers first");
+    if test_toggle.changed() {
         engine.send(if test {
             Command::StartDemo
         } else {
