@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 (2026-10-28)
+
+- The digit bar and the live preview narrow the bunker down as the grid digits arrive. The bar says how many bunkers still fit ("3 bunkers possible"), or "Only Bunker 7 fits" when one is left, and shows the grid digits you have not heard yet as dim ghost digits for that bunker. The caption and the ghost digits disappear once the grid is complete.
+- A Freeze button in the header locks the bunkers found so far against later transmissions. It lights up when all 23 are found. While frozen, the test-mode switch and "Forget the bunkers heard so far" are disabled, and transmissions heard in the meantime are not replayed when you unfreeze.
+
 ## 0.3.1 (2026-10-26)
 
 - Quiet games no longer read as nothing. With the game volume turned down, every digit's tone evidence fell below the cut-off and the whole message was dropped, although the decoder had read it right: both live messages checked matched a real bunker's grid exactly. A grid that is exactly one of the 23 bunkers is now kept whatever its evidence, in the live preview too, and the digit bar no longer paints it as a weak reading, and the lock code digits of weak passes now count towards the vote, so a few repeats of a bunker settle its code where one weak pass showed `?`.
