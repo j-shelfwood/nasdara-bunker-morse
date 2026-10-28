@@ -23,6 +23,8 @@ pub enum Command {
     SetSource(Source),
     StartDemo,
     ClearCards,
+    /// Locks the cards and the ledger against later transmissions and against `ClearCards`; listening goes on.
+    SetFrozen(bool),
 }
 
 #[derive(Clone)]

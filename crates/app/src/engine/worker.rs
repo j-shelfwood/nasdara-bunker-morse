@@ -188,7 +188,14 @@ impl Engine {
                 self.mode = Mode::Demo;
                 self.restart(tx);
             }
+            Command::SetFrozen(frozen) => {
+                self.lock().frozen = frozen;
+                self.ctx.request_repaint();
+            }
             Command::ClearCards => {
+                if self.lock().frozen {
+                    return;
+                }
                 self.ledger = BunkerLedger::new();
                 let mut s = self.lock();
                 s.cards.clear();
