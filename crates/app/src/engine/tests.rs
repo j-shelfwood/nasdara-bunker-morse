@@ -252,3 +252,66 @@ fn a_grid_that_matches_no_bunker_keeps_its_own_support() {
     let painted = painted_support(&record_with("123456", 0.1));
     assert_eq!(painted, vec![0.1; 10]);
 }
+
+/// A transmission of the demo broadcast, fed through the normal sample path with the stream ended after it.
+fn hear_demo(e: &mut Engine, generation: u64) {
+    let pcm = synth::demo_transmission(7);
+    for c in synth::chunks(&pcm) {
+        e.event(msg(generation, Event::Samples(c.to_vec())));
+    }
+    e.event(msg(generation, Event::SessionEnded));
+}
+
+fn heard(e: &Engine) -> usize {
+    e.lock().cards.iter().map(|c| c.count).sum()
+}
+
+#[test]
+fn frozen_ignores_a_transmission_that_would_add_a_card() {
+    let mut e = engine(1);
+    let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+    e.command(Command::SetFrozen(true), &tx);
+    hear_demo(&mut e, 1);
+    let s = e.lock();
+    assert!(s.cards.is_empty() && s.finished.is_none() && s.changed.is_empty());
+    assert!(s.frozen);
+}
+
+#[test]
+fn frozen_keeps_listening_and_previewing() {
+    let mut e = engine(1);
+    let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+    e.command(Command::SetFrozen(true), &tx);
+    let pcm = synth::demo_transmission(7);
+    for c in synth::chunks(&pcm[..pcm.len() / 2]) {
+        e.event(msg(1, Event::Samples(c.to_vec())));
+    }
+    assert!(!e.lock().frames.is_empty() && !e.lock().beeps.is_empty());
+}
+
+#[test]
+fn frozen_ignores_clear_cards() {
+    let mut e = engine(1);
+    let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+    hear_demo(&mut e, 1);
+    let before = heard(&e);
+    assert!(before > 0);
+    e.command(Command::SetFrozen(true), &tx);
+    e.command(Command::ClearCards, &tx);
+    assert_eq!(heard(&e), before);
+    assert!(e.lock().finished.is_some());
+}
+
+#[test]
+fn unfreeze_accepts_transmissions_and_clearing_again() {
+    let mut e = engine(1);
+    let (tx, _rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+    e.command(Command::SetFrozen(true), &tx);
+    hear_demo(&mut e, 1);
+    assert_eq!(heard(&e), 0);
+    e.command(Command::SetFrozen(false), &tx);
+    hear_demo(&mut e, 1);
+    assert!(heard(&e) > 0);
+    e.command(Command::ClearCards, &tx);
+    assert!(e.lock().cards.is_empty());
+}

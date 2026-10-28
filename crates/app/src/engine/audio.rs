@@ -130,7 +130,7 @@ impl Engine {
             if let Some(log) = &self.log {
                 lines.extend(log.burst(&b, shown));
             }
-            if b.ignored.is_some() {
+            if s.frozen || b.ignored.is_some() {
                 continue;
             }
             if b.records.is_empty() {

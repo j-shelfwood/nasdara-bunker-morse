@@ -48,7 +48,13 @@ pub fn menu(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
         still,
     );
     ui.separator();
-    if ui.button("Forget the bunkers heard so far").clicked() {
+    let forget = ui
+        .add_enabled(
+            !s.frozen,
+            egui::Button::new("Forget the bunkers heard so far"),
+        )
+        .on_disabled_hover_text("Unfreeze the bunkers first");
+    if forget.clicked() {
         engine.send(Command::ClearCards);
     }
     if ui.button("Show the walkthrough again").clicked() {

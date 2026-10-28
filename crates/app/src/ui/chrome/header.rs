@@ -1,6 +1,6 @@
 //! The title row: logo, status chip, help, keep-on-top, options menu and the audio source switch.
 
-use egui::{Align, Layout, Pos2, RichText, Stroke, Ui, Vec2};
+use egui::{Align, Layout, Pos2, Rect, RichText, Stroke, Ui, Vec2};
 
 use super::options;
 use crate::capture::Source;
@@ -29,10 +29,54 @@ pub fn show(ui: &mut Ui, engine: &Handle, st: &mut UiState, s: &Shared) {
         } else {
             pulse
         };
+        let label = if s.frozen {
+            format!("{label} (bunkers frozen)")
+        } else {
+            label
+        };
         pill(ui, &Pill { dot, pulse, label });
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
+            let heard = s.cards.iter().filter(|c| c.bunker.is_some()).count();
+            let ready = heard >= 23 && !s.frozen;
+            let tip = if s.frozen {
+                "Bunkers frozen. Click to unfreeze and listen for changes again"
+            } else if ready {
+                "All 23 bunkers found. Click to freeze them so later noise cannot change them"
+            } else {
+                "Freeze the bunkers found so far against later transmissions"
+            };
+            let freeze = widgets::icon_button(ui, Some(s.frozen), tip, |p, r, c| {
+                let body = Rect::from_min_max(
+                    Pos2::new(r.left() + 1.0, r.center().y),
+                    Pos2::new(r.right() - 1.0, r.bottom()),
+                );
+                p.rect_filled(body, 2.0, c);
+                let lift = if s.frozen { 0.0 } else { 3.0 };
+                let (l, rt, top) = (r.left() + 3.5, r.right() - 3.5, r.top() + 1.0 - lift);
+                let stroke = Stroke::new(1.6, c);
+                p.line_segment(
+                    [Pos2::new(l, r.center().y - lift), Pos2::new(l, top + 2.0)],
+                    stroke,
+                );
+                p.line_segment([Pos2::new(l, top + 2.0), Pos2::new(rt, top + 2.0)], stroke);
+                p.line_segment(
+                    [Pos2::new(rt, top + 2.0), Pos2::new(rt, r.center().y - lift)],
+                    stroke,
+                );
+            });
+            if ready {
+                ui.painter().rect_stroke(
+                    freeze.rect,
+                    15.0,
+                    Stroke::new(1.5, theme::AMBER),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if freeze.clicked() {
+                engine.send(Command::SetFrozen(!s.frozen));
+            }
             let help = widgets::icon_button(ui, None, "How it works", |p, r, c| {
                 p.circle_stroke(r.center(), r.width() / 2.0, Stroke::new(1.5, c));
                 p.text(

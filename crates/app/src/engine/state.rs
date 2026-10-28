@@ -82,6 +82,8 @@ pub struct Shared {
     pub preview: Option<Preview>,
     pub finished: Option<Finished>,
     pub cards: Vec<Card>,
+    /// The cards are locked: no transmission adds to or revises them and they cannot be cleared.
+    pub frozen: bool,
     pub notes: Vec<Note>,
     pub level: f32,
     pub silent_for: f64,
@@ -106,6 +108,7 @@ impl Shared {
             preview: None,
             finished: None,
             cards: Vec::new(),
+            frozen: false,
             notes: Vec::new(),
             level: 0.0,
             silent_for: 0.0,
