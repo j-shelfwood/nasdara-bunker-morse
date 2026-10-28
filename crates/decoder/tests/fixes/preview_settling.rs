@@ -40,3 +40,25 @@ fn only_the_trailing_preview_digit_is_unsettled_and_the_first_settled_reading_is
     let settled: String = settled_seen.iter().map(|c| c.unwrap_or('-')).collect();
     assert_eq!(settled, truth);
 }
+
+#[test]
+fn the_preview_narrows_its_candidates_as_grid_digits_settle_and_ends_on_the_true_bunker() {
+    let pcm = render(&one_record("4821", 1)).pcm;
+    let mut p = Pipeline::new();
+    let mut counts: Vec<usize> = Vec::new();
+    let mut last: Option<Preview> = None;
+    for c in chunks(&pcm) {
+        p.push(c);
+        if let Some(pv) = p.preview() {
+            counts.push(pv.candidates.len());
+            last = Some(pv);
+        }
+    }
+    let last = last.expect("a preview");
+    assert!(
+        counts.iter().any(|&n| n > 1) && counts.iter().any(|&n| n <= 1),
+        "candidate counts over the previews: {counts:?}"
+    );
+    assert_eq!(last.candidates.len(), 1, "counts: {counts:?}");
+    assert_eq!(last.candidates[0].index, bunkers()[0].index);
+}

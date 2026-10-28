@@ -1,5 +1,6 @@
 use super::record::shown_digits;
 use super::{OpenBurst, Pipeline, TRACE_MARGIN_S};
+use crate::bunkers::{Bunker, candidates};
 use crate::grid::{DIGITS_PER_RECORD, SHIPPED_TIMING, decode_prefix, longest_digit_s};
 use crate::tone::FRAME_SECONDS;
 use std::sync::{Mutex, MutexGuard};
@@ -40,6 +41,9 @@ pub struct Preview {
     /// Stream seconds of the first digit.
     pub start: f64,
     pub digits: Vec<PreviewDigit>,
+    /// Bunkers whose grid fits the trustworthy grid digits so far: settled digits at or above `MIN_SUPPORT`
+    /// (an unsettled or weak digit counts as unheard). Empty when the heard digits fit no bunker.
+    pub candidates: Vec<&'static Bunker>,
 }
 
 #[derive(Debug)]
@@ -96,7 +100,7 @@ impl Pipeline {
         let longest = longest_digit_s(&SHIPPED_TIMING);
         let n = g.digits.len();
         let shown = shown_digits(&g.digits, &g.support);
-        let digits = (0..n)
+        let digits: Vec<PreviewDigit> = (0..n)
             .map(|i| PreviewDigit {
                 ch: shown[i],
                 support: g.support[i],
@@ -108,8 +112,14 @@ impl Pipeline {
                         && t0 + g.starts[i] + longest + SETTLE_S <= trace_end),
             })
             .collect();
+        let trusted: Vec<char> = digits
+            .iter()
+            .take(6)
+            .map(|d| if d.settled { d.ch } else { '?' })
+            .collect();
         Some(Preview {
             start: t0 + g.start,
+            candidates: candidates(&trusted),
             digits,
         })
     }
