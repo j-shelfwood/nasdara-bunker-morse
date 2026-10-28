@@ -2,6 +2,7 @@
 //! and the headline with its hint.
 
 use crate::engine::Shared;
+use nasdara_decoder::bunkers::Bunker;
 
 pub(super) const DIGITS: usize = 10;
 /// Length above which a tone counts as a dash (dots are ~0.09 s, dashes ~0.48 s).
@@ -22,6 +23,8 @@ pub(super) struct Slot {
     pub ch: Option<char>,
     pub support: f32,
     pub phase: Phase,
+    /// The digit the one remaining candidate bunker has in this still-empty grid slot.
+    pub ghost: Option<char>,
 }
 
 pub struct View {
@@ -30,6 +33,22 @@ pub struct View {
     pub(super) live_symbols: String,
     pub headline: String,
     pub hint: String,
+    /// Bunkers that still fit the grid digits heard so far; empty outside a transmission and when none fits.
+    pub candidates: Vec<&'static Bunker>,
+}
+
+impl View {
+    /// "3 bunkers possible" or "Only Bunker 7 fits"; `None` while every bunker is still possible or none fits.
+    pub fn candidate_caption(&self, short: bool) -> Option<String> {
+        match (self.candidates.as_slice(), short) {
+            ([], _) => None,
+            ([b], false) => Some(format!("Only Bunker {} fits", b.index)),
+            ([b], true) => Some(format!("Bunker {}", b.index)),
+            (c, _) if c.len() >= nasdara_decoder::bunkers::bunkers().len() => None,
+            (c, false) => Some(format!("{} bunkers possible", c.len())),
+            (c, true) => Some(format!("{} possible", c.len())),
+        }
+    }
 }
 
 /// Symbols heard so far of the digit being sent; empty when no message is arriving.
@@ -43,7 +62,8 @@ pub fn view(s: &Shared) -> View {
         Slot {
             ch: None,
             support: 0.0,
-            phase: Phase::Empty
+            phase: Phase::Empty,
+            ghost: None
         };
         DIGITS
     ];
@@ -65,6 +85,7 @@ pub fn view(s: &Shared) -> View {
                     ch: Some(d.ch),
                     support: d.support,
                     phase: Phase::Provisional,
+                    ghost: None,
                 };
             }
         }
@@ -92,8 +113,15 @@ pub fn view(s: &Shared) -> View {
         if done < DIGITS {
             slots[done].phase = Phase::Active;
         }
+        let candidates = preview.map_or_else(Vec::new, |p| p.candidates.clone());
+        if let [b] = candidates[..] {
+            for (i, g) in b.grid.chars().enumerate().skip(done) {
+                slots[i].ghost = Some(g);
+            }
+        }
         let n = done.min(DIGITS);
         return View {
+            candidates,
             slots,
             live_symbols,
             headline: format!("Receiving a transmission, digit {} of {DIGITS}", (n + 1).min(DIGITS)),
@@ -107,6 +135,7 @@ pub fn view(s: &Shared) -> View {
                 ch: Some(*ch),
                 support: f.support.get(i).copied().unwrap_or(0.0),
                 phase: Phase::Final,
+                ghost: None,
             };
         }
         let ago = f.heard.elapsed().as_secs();
@@ -116,6 +145,7 @@ pub fn view(s: &Shared) -> View {
                 format!("bunker {b}")
             });
         return View {
+            candidates: Vec::new(),
             slots,
             live_symbols,
             headline: format!("Last transmission: {which}, {}", ago_text(ago)),
@@ -134,6 +164,7 @@ pub fn view(s: &Shared) -> View {
         crate::capture::Status::Failed(ref e) => ("Cannot listen".to_string(), e.clone()),
     };
     View {
+        candidates: Vec::new(),
         slots,
         live_symbols,
         headline,
@@ -147,5 +178,77 @@ fn ago_text(secs: u64) -> String {
         5..=59 => format!("{secs} s ago"),
         60..=3599 => format!("{} min ago", secs / 60),
         _ => format!("{} h ago", secs / 3600),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture::{Source, Status};
+    use crate::engine::Beep;
+    use nasdara_decoder::bunkers::{bunkers, candidates};
+    use nasdara_decoder::pipeline::{Preview, PreviewDigit};
+
+    fn receiving(heard: &str) -> Shared {
+        let mut s = Shared::new(Source::Game);
+        s.status = Status::Listening;
+        s.burst_beeps = 6;
+        s.beeps.push_back(Beep {
+            start: 0.0,
+            end: None,
+        });
+        let digits: Vec<PreviewDigit> = heard
+            .chars()
+            .enumerate()
+            .map(|(i, ch)| PreviewDigit {
+                ch,
+                support: 0.9,
+                margin: 0.5,
+                start: i as f64,
+                window_end: i as f64 + 0.9,
+                settled: true,
+            })
+            .collect();
+        let chars: Vec<char> = heard.chars().collect();
+        s.preview = Some(Preview {
+            start: 0.0,
+            candidates: candidates(&chars),
+            digits,
+        });
+        s
+    }
+
+    #[test]
+    fn the_candidate_count_reaches_the_view_and_a_single_bunker_ghosts_its_remaining_digits() {
+        let grid = bunkers()[19].grid.clone();
+        let one = view(&receiving(&grid[..1]));
+        assert!(one.candidates.len() > 1);
+        assert_eq!(
+            one.candidate_caption(false),
+            Some(format!("{} bunkers possible", one.candidates.len()))
+        );
+        assert!(one.slots.iter().all(|s| s.ghost.is_none()));
+
+        let mut n = 2;
+        let narrowed = loop {
+            let v = view(&receiving(&grid[..n]));
+            if v.candidates.len() == 1 {
+                break v;
+            }
+            n += 1;
+        };
+        assert_eq!(
+            narrowed.candidate_caption(false),
+            Some("Only Bunker 20 fits".into())
+        );
+        let ghosts: String = narrowed.slots.iter().filter_map(|s| s.ghost).collect();
+        assert_eq!(ghosts, grid[n..]);
+        assert!(narrowed.slots[..n].iter().all(|s| s.ghost.is_none()));
+    }
+
+    #[test]
+    fn no_transmission_means_no_candidates() {
+        let v = view(&Shared::new(Source::Game));
+        assert!(v.candidates.is_empty() && v.candidate_caption(false).is_none());
     }
 }

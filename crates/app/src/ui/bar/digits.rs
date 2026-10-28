@@ -80,7 +80,31 @@ pub fn show(ui: &mut Ui, st: &mut UiState, v: &View, area: Rect) {
             + 8.0;
         let line = Stroke::new(HAIRLINE, STROKE);
         painter.line_segment([Pos2::new(x0, y), Pos2::new(mid - half, y)], line);
-        painter.line_segment([Pos2::new(mid + half, y), Pos2::new(x1, y)], line);
+        let right = (Pos2::new(mid + half, y), Pos2::new(x1, y));
+        let caption = if a == 0 {
+            fitting_caption(&painter, v, right.1.x - right.0.x - 12.0)
+        } else {
+            None
+        };
+        match caption {
+            Some(text) => {
+                let at = Pos2::new((right.0.x + right.1.x) / 2.0, y);
+                painter.text(at, Align2::CENTER_CENTER, text, theme::text(10.5), AMBER);
+            }
+            None => {
+                painter.line_segment([right.0, right.1], line);
+            }
+        }
+        if a == 0
+            && let Some(full) = v.candidate_caption(false)
+        {
+            let strip = Rect::from_min_max(
+                Pos2::new(x0, area.top()),
+                Pos2::new(x1, area.top() + CAPTION_H),
+            );
+            let response = ui.interact(strip, ui.make_persistent_id("candidates"), Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(Role::Label, true, full.clone()));
+        }
     }
 
     let blink = motion.reduce || (now * 2.0).fract() < 0.5;
@@ -97,7 +121,7 @@ pub fn show(ui: &mut Ui, st: &mut UiState, v: &View, area: Rect) {
         let rect = rects[i];
         let response = ui.interact(rect, ui.make_persistent_id(("slot", i)), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken(i, slot)));
-        paint_slot(&painter, rect, slot, &v.live_symbols, anim);
+        paint_slot(&painter, rect, slot, &v.live_symbols, anim, motion.reduce);
     }
 }
 
@@ -108,6 +132,9 @@ fn spoken(i: usize, slot: &Slot) -> String {
     } else {
         format!("Lock code digit {}", i - 5)
     };
+    if let (None, Some(g)) = (slot.ch, slot.ghost) {
+        return format!("{place}: {g}, predicted");
+    }
     match (slot.ch, slot.phase) {
         (Some('?'), _) => format!("{place}: unreadable"),
         (Some(c), Phase::Final) => format!("{place}: {c}, {} reading", confidence(slot.support).1),
@@ -157,7 +184,28 @@ fn outline(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
     paint_frame(painter, rect, Color32::TRANSPARENT, stroke, CUT * 0.5);
 }
 
-fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, anim: Anim) {
+/// The candidate caption in the longest form that fits `room` points, or `None`.
+fn fitting_caption(painter: &egui::Painter, v: &View, room: f32) -> Option<String> {
+    [false, true]
+        .into_iter()
+        .filter_map(|short| v.candidate_caption(short))
+        .find(|text| {
+            painter
+                .layout_no_wrap(text.clone(), theme::text(10.5), AMBER)
+                .size()
+                .x
+                <= room
+        })
+}
+
+fn paint_slot(
+    painter: &egui::Painter,
+    rect: Rect,
+    slot: &Slot,
+    live: &str,
+    anim: Anim,
+    reduce_motion: bool,
+) {
     let phase = slot.phase;
     let cut = CUT * 0.5;
     let (border, fill) = match phase {
@@ -217,6 +265,16 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, anim
                 paint_confidence(painter, rect, slot.support, short);
             }
         }
+        (None, Phase::Active) if live.is_empty() && slot.ghost.is_some() => {
+            paint_ghost(
+                painter,
+                centre,
+                slot.ghost,
+                font,
+                reduce_motion,
+                anim.breathe,
+            );
+        }
         (None, Phase::Active) if live.is_empty() => {
             if anim.blink {
                 let bar = Vec2::new(2.0, zone.height() * 0.5);
@@ -227,9 +285,44 @@ fn paint_slot(painter: &egui::Painter, rect: Rect, slot: &Slot, live: &str, anim
             let fit = (rect.width() - 8.0) / symbols_width(live);
             paint_symbols(painter, centre, live, 1.5_f32.min(fit), AMBER);
         }
+        (None, Phase::Empty) if slot.ghost.is_some() => {
+            paint_ghost(
+                painter,
+                centre,
+                slot.ghost,
+                font,
+                reduce_motion,
+                anim.breathe,
+            );
+        }
         (None, _) => {
             painter.add(Shape::circle_filled(centre, 2.0, FAINT));
         }
+    }
+}
+
+/// The digit the only remaining bunker has here: smaller and fainter than any heard digit, in the dim text colour
+/// instead of amber, with a dotted underline so it does not rely on colour alone. It breathes only with motion on.
+fn paint_ghost(
+    painter: &egui::Painter,
+    centre: Pos2,
+    ghost: Option<char>,
+    font: f32,
+    reduce_motion: bool,
+    breathe: f32,
+) {
+    let Some(ch) = ghost else { return };
+    let strength = if reduce_motion {
+        0.30
+    } else {
+        0.22 + 0.12 * breathe
+    };
+    let size = font * 0.8;
+    paint_digit(painter, centre, ch, size, alpha(DIM, strength));
+    let y = centre.y + size * 0.5;
+    for k in -1..=1 {
+        let c = Pos2::new(centre.x + k as f32 * 6.0, y);
+        painter.add(Shape::circle_filled(c, 1.0, alpha(DIM, strength)));
     }
 }
 

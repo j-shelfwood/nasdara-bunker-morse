@@ -169,6 +169,17 @@ impl Snap {
     }
 }
 
+/// Every bunker whose grid fits the digits heard so far: `prefix` is the grid read from its first digit on,
+/// a '?' (unreadable, or not trustworthy) matches anything and positions past the prefix are not yet heard.
+/// Digits beyond the sixth are not part of the grid and are ignored.
+pub fn candidates(prefix: &[char]) -> Vec<&'static Bunker> {
+    let heard = &prefix[..prefix.len().min(6)];
+    bunkers()
+        .iter()
+        .filter(|b| mismatches(heard, &b.grid) == 0)
+        .collect()
+}
+
 const MIN_HEARD_FOR_INFERRED: usize = 4;
 const MIN_HEARD_FOR_CORRECTED: usize = 5;
 
@@ -200,5 +211,54 @@ pub fn snap_grid(grid: &str) -> Snap {
     match near[..] {
         [b] => Snap::Corrected(b),
         _ => Snap::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bunkers, candidates};
+
+    fn chars(s: &str) -> Vec<char> {
+        s.chars().collect()
+    }
+
+    #[test]
+    fn an_empty_prefix_fits_all_23_bunkers() {
+        assert_eq!(candidates(&[]).len(), 23);
+    }
+
+    #[test]
+    fn a_prefix_that_only_one_bunker_has_leaves_that_bunker() {
+        let target = &bunkers()[19];
+        let mut n = 1;
+        while candidates(&chars(&target.grid[..n])).len() > 1 {
+            n += 1;
+        }
+        let fit = candidates(&chars(&target.grid[..n]));
+        assert_eq!(fit.len(), 1);
+        assert_eq!(fit[0].index, target.index);
+        assert!(n < 6, "bunker 20 is unique before the sixth digit");
+    }
+
+    #[test]
+    fn an_unreadable_digit_matches_anything_so_a_masked_wrong_guess_keeps_the_true_bunker() {
+        let target = &bunkers()[19];
+        let mut heard = chars(&target.grid);
+        heard[1] = if heard[1] == '9' { '0' } else { '9' };
+        let unmasked = candidates(&heard);
+        assert!(!unmasked.iter().any(|b| b.index == target.index));
+        heard[1] = '?';
+        assert!(candidates(&heard).iter().any(|b| b.index == target.index));
+    }
+
+    #[test]
+    fn digits_past_the_sixth_are_not_part_of_the_grid() {
+        let target = &bunkers()[3];
+        let with_code = chars(&format!("{}1234", target.grid));
+        assert!(
+            candidates(&with_code)
+                .iter()
+                .any(|b| b.index == target.index)
+        );
     }
 }

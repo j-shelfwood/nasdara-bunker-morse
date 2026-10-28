@@ -92,7 +92,7 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub(super) fn new(source: Source) -> Shared {
+    pub(crate) fn new(source: Source) -> Shared {
         Shared {
             status: Status::WaitingForGame,
             mode: Mode::Live,
