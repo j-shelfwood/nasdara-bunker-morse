@@ -5,6 +5,8 @@ use crate::engine::Shared;
 use nasdara_decoder::bunkers::Bunker;
 
 pub(super) const DIGITS: usize = 10;
+/// The first slots hold the map grid; the rest hold the lock code.
+pub(super) const GRID_DIGITS: usize = 6;
 /// Length above which a tone counts as a dash (dots are ~0.09 s, dashes ~0.48 s).
 pub const DASH_FROM_S: f64 = 0.28;
 
@@ -38,8 +40,12 @@ pub struct View {
 }
 
 impl View {
-    /// "3 bunkers possible" or "Only Bunker 7 fits"; `None` while every bunker is still possible or none fits.
+    /// "3 bunkers possible" or "Only Bunker 7 fits"; `None` while every bunker is still possible or none fits, and
+    /// once every grid slot is filled (the digits themselves say it).
     pub fn candidate_caption(&self, short: bool) -> Option<String> {
+        if self.slots.iter().take(GRID_DIGITS).all(|s| s.ch.is_some()) {
+            return None;
+        }
         match (self.candidates.as_slice(), short) {
             ([], _) => None,
             ([b], false) => Some(format!("Only Bunker {} fits", b.index)),
@@ -244,6 +250,15 @@ mod tests {
         let ghosts: String = narrowed.slots.iter().filter_map(|s| s.ghost).collect();
         assert_eq!(ghosts, grid[n..]);
         assert!(narrowed.slots[..n].iter().all(|s| s.ghost.is_none()));
+    }
+
+    #[test]
+    fn the_caption_goes_once_every_grid_slot_is_filled() {
+        let grid = bunkers()[19].grid.clone();
+        let half = view(&receiving(&grid[..3]));
+        assert!(half.candidate_caption(false).is_some());
+        let full = view(&receiving(&grid));
+        assert!(full.candidate_caption(false).is_none() && full.candidate_caption(true).is_none());
     }
 
     #[test]
