@@ -87,7 +87,7 @@ Details, measurements and assumptions: [docs/how-it-works.md](docs/how-it-works.
 ## Building
 
 Needs a recent stable [Rust](https://rustup.rs). The decoder crate builds and tests anywhere; the app is Windows-first
-(live capture needs Windows). The app has only been run on Windows and on macOS (where it plays the demo on repeat, since there is nothing to listen to); CI compiles
+(live capture needs Windows). The app has only been run on Windows and on macOS (where it plays the demo on repeat, since there is nothing to listen to); the release workflow compiles
 it on Windows only, so Linux is untested.
 
 ```
